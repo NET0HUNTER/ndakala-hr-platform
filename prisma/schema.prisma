@@ -1,0 +1,2282 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+model Organisation {
+  id                 String   @id @default(uuid())
+  legalName          String   @default("Ndakala Advisory LLP")
+  tradingName        String?  @default("Ndakala Advisory")
+  registrationNumber String?
+  taxId              String?
+  address            String   @default("246 Owashika Road, Lavington, Nairobi, Kenya")
+  phone              String   @default("+254 792 605 909")
+  email              String   @default("info@ndakalaadvisory.co.ke")
+  website            String   @default("www.ndakalaadvisory.co.ke")
+  timezone           String   @default("Africa/Nairobi")
+  currencyCode       String   @default("KES")
+  leaveYearStart     String   @default("01-01")
+  financialYearStart String   @default("01-01")
+  workCalendar       String   @default("{\"workingDays\":[\"Monday\",\"Tuesday\",\"Wednesday\",\"Thursday\",\"Friday\",\"Saturday\"],\"restDays\":[\"Sunday\"]}")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model Department {
+  id                 String     @id @default(uuid())
+  code               String     @unique
+  name               String
+  parentDepartmentId String?
+  costCenterId       String?
+  headOfDepartmentId String?
+  isActive           Boolean    @default(true)
+  effectiveFrom      DateTime   @default(now())
+  effectiveTo        DateTime?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  parentDepartment   Department?  @relation("DeptHierarchy", fields: [parentDepartmentId], references: [id])
+  childDepartments   Department[] @relation("DeptHierarchy")
+  positions          Position[]
+  employees          Employee[]
+  requisitions       StaffRequisition[]
+}
+
+model Position {
+  id                  String     @id @default(uuid())
+  code                String     @unique
+  title               String
+  departmentId        String
+  gradeId             String?
+  reportsToPositionId String?
+  isActive            Boolean    @default(true)
+  effectiveFrom       DateTime   @default(now())
+  effectiveTo         DateTime?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  department          Department @relation(fields: [departmentId], references: [id])
+  grade               Grade?     @relation(fields: [gradeId], references: [id])
+  reportsTo           Position?  @relation("PositionHierarchy", fields: [reportsToPositionId], references: [id])
+  directReports       Position[] @relation("PositionHierarchy")
+  employees           Employee[]
+}
+
+model Grade {
+  id               String     @id @default(uuid())
+  code             String     @unique
+  name             String
+  level            Int
+  noticePeriodDays Int?       // D-20 open: no default notice period is assumed
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  positions        Position[]
+  employees        Employee[]
+}
+
+model Location {
+  id           String   @id @default(uuid())
+  code         String   @unique
+  name         String
+  address      String?
+  isHeadOffice Boolean  @default(false)
+  timezone     String   @default("Africa/Nairobi")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  employees    Employee[]
+}
+
+model CostCenter {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ReportingRelationship {
+  id               String    @id @default(uuid())
+  subordinateId    String
+  supervisorId     String
+  relationshipType String    @default("PRIMARY") // PRIMARY, SECONDARY, ACTING
+  effectiveFrom    DateTime  @default(now())
+  effectiveTo      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+model User {
+  id                  String    @id @default(uuid())
+  email               String    @unique
+  name                String
+  passwordHash        String
+  isActive            Boolean   @default(true)
+  mfaSecret           String?
+  mfaEnabled          Boolean   @default(false)
+  mustChangePassword  Boolean   @default(false)
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  departmentId        String?
+  positionId          String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  sessions            Session[]
+  roleAssignments     UserRoleAssignment[]
+  employee            Employee?
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  name        String   @unique
+  description String
+  isSystem    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  permissions     RolePermission[]
+  userAssignments UserRoleAssignment[]
+}
+
+model Permission {
+  key         String @id
+  module      String
+  description String
+
+  roles RolePermission[]
+}
+
+model RolePermission {
+  roleId        String
+  permissionKey String
+  role          Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission    Permission @relation(fields: [permissionKey], references: [key], onDelete: Cascade)
+
+  @@id([roleId, permissionKey])
+}
+
+model UserRoleAssignment {
+  id            String    @id @default(uuid())
+  userId        String
+  roleId        String
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+  assignedById  String
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role          Role      @relation(fields: [roleId], references: [id], onDelete: Cascade)
+}
+
+model Session {
+  id         String    @id @default(uuid())
+  userId     String
+  tokenHash  String    @unique
+  csrfToken  String
+  ip         String?
+  userAgent  String?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  timestamp     DateTime @default(now())
+  actorUserId   String?
+  actorEmail    String?
+  actorRole     String?
+  action        String
+  targetType    String
+  targetId      String?
+  outcome       String   // SUCCESS, FAILURE, BLOCKED
+  reason        String?
+  correlationId String?
+  before        String?  // JSON string
+  after         String?  // JSON string
+  ip            String?
+  userAgent     String?
+}
+
+model PolicyConfiguration {
+  id               String    @id @default(uuid())
+  code             String
+  title            String
+  layer            String    // STATUTORY, ORGANISATION, LOCATION, DEPARTMENT, EXCEPTION
+  locationId       String?
+  departmentId     String?
+  gradeId          String?
+  targetEmployeeId String?
+  version          Int       @default(1)
+  status           String    @default("DRAFT") // DRAFT, SUBMITTED, APPROVED, SCHEDULED, ACTIVE, SUPERSEDED, ARCHIVED
+  values           String    // JSON string containing configuration payload
+  customFields     String?   // JSON string
+  sourceReference  String
+  owner            String
+  reviewDate       DateTime?
+  effectiveFrom    DateTime
+  effectiveTo      DateTime?
+  createdById      String
+  submittedById    String?
+  approvedById     String?
+  approvedAt       DateTime?
+  supersededById   String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+model WorkflowDefinition {
+  id                       String   @id @default(uuid())
+  code                     String   @unique
+  name                     String
+  version                  Int      @default(1)
+  isActive                 Boolean  @default(true)
+  preventSelfApproval      Boolean  @default(true)
+  requireSeparationOfDuties Boolean @default(true)
+  stages                   String   // JSON array of stage definitions
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  instances                WorkflowInstance[]
+}
+
+model WorkflowInstance {
+  id                String   @id @default(uuid())
+  definitionId      String
+  definitionVersion Int
+  targetType        String
+  targetId          String
+  initiatorUserId   String
+  currentStageIndex Int      @default(0)
+  status            String   @default("IN_PROGRESS") // IN_PROGRESS, APPROVED, REJECTED, RETURNED_FOR_EDIT, CANCELLED
+  history           String   @default("[]") // JSON array of execution steps
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  definition        WorkflowDefinition @relation(fields: [definitionId], references: [id])
+  tasks             WorkflowTask[]
+}
+
+model WorkflowTask {
+  id              String    @id @default(uuid())
+  instanceId      String
+  assignedRoleKey String?
+  assignedUserId  String?
+  title           String
+  description     String?
+  targetType      String
+  targetId        String
+  stageIndex      Int
+  dueDate         DateTime?
+  status          String    @default("PENDING") // PENDING, COMPLETED, REJECTED, CANCELLED
+  completedById   String?
+  completedAt     DateTime?
+  decision        String?
+  comments        String?
+  deepLink        String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  instance        WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+}
+
+model DocumentRecord {
+  id                     String   @id @default(uuid())
+  fileName               String
+  mimeType               String
+  fileSizeBytes          Int
+  storageKey             String   @unique
+  storagePath            String
+  checksumSha256         String
+  category               String   // POLICY, ORGANISATION, COMPLIANCE, EMPLOYEE
+  securityClassification String   @default("INTERNAL") // PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED
+  version                Int      @default(1)
+  uploadedById           String
+  isMalwareScanned       Boolean  @default(true)
+  isArchived             Boolean  @default(false)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  employeeDocuments      EmployeeDocument[]
+}
+
+model Notification {
+  id              String    @id @default(uuid())
+  recipientUserId String
+  title           String
+  message         String
+  channel         String    @default("IN_APP") // IN_APP, EMAIL
+  status          String    @default("PENDING") // PENDING, DELIVERED, FAILED
+  attempts        Int       @default(0)
+  maxAttempts     Int       @default(3)
+  lastAttemptAt   DateTime?
+  nextAttemptAt   DateTime?
+  idempotencyKey  String?   @unique
+  failureReason   String?
+  isRead          Boolean   @default(false)
+  deepLink        String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+// -------------------------------------------------------------
+// PHASE 2: EMPLOYEE MASTER & LIFECYCLE MODELS (EMP-01..EMP-06)
+// -------------------------------------------------------------
+
+// Configurable employee/worker category (D-25 open). Activation requires maker-checker.
+// Probation length, extension ceiling and notice period are NULL until HR/counsel
+// confirm them (D-18, D-20). NULL means "not configured" and the platform blocks
+// any action that depends on the value instead of assuming one.
+model EmploymentCategory {
+  id                          String    @id @default(uuid())
+  code                        String    @unique
+  name                        String
+  description                 String?
+  status                      String    @default("DRAFT") // DRAFT, ACTIVE, INACTIVE
+  probationApplies            Boolean?  // NULL = not confirmed
+  defaultProbationMonths      Int?      // D-18
+  maxProbationExtensionMonths Int?      // D-18 (source form says 3; NOT active until confirmed)
+  defaultNoticePeriodDays     Int?      // D-20
+  probationReminderLeadDays   Int?      // reminder before probation end; NULL = no reminder rule
+  sourceReference             String
+  decisionReference           String?   // e.g. "D-25"
+  createdById                 String
+  approvedById                String?
+  approvedAt                  DateTime?
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
+}
+
+// Concurrency-safe employee number sequence (one row per year)
+model EmployeeNumberSequence {
+  year      Int @id
+  lastValue Int @default(0)
+}
+
+model Employee {
+  id                           String    @id @default(uuid())
+  employeeNumber               String    @unique
+  userId                       String?   @unique
+  firstName                    String
+  middleName                   String?
+  lastName                     String
+  preferredName                String?
+  dateOfBirth                  DateTime?
+  gender                       String?
+  personalEmail                String?
+  workEmail                    String    @unique
+  phoneNumber                  String
+  emergencyContactName         String?
+  emergencyContactPhone        String?
+  emergencyContactRelationship String?
+  nextOfKinName                String?
+  nextOfKinPhone               String?
+  nextOfKinRelationship        String?
+
+  // Sensitive & statutory fields (AES-256-GCM encrypted via Vault; separated from profile)
+  nationalIdEncrypted          String?
+  nationalIdHash               String?   @unique // keyed HMAC for duplicate detection only
+  kraPinEncrypted              String?
+  nssfNumberEncrypted          String?
+  shifNumberEncrypted          String?
+  bankNameEncrypted            String?
+  bankBranchEncrypted          String?
+  bankAccountNumberEncrypted   String?
+
+  status                       String    @default("ONBOARDING") // ONBOARDING, PROBATION, ACTIVE, SUSPENDED, RESIGNED, TERMINATED, RETIRED, DECEASED
+  isActive                     Boolean   @default(true)
+  deactivatedAt                DateTime?
+  deactivationReason           String?
+  profileCompletionStatus      String    @default("NOT_STARTED") // NOT_STARTED, SUBMITTED, APPROVED, RETURNED
+  onboardingCompletedAt        DateTime?
+  onboardingCompletedById      String?
+
+  // Current organisational links (denormalised projection of the open ReportingAssignmentHistory row)
+  departmentId                 String?
+  positionId                   String?
+  gradeId                      String?
+  locationId                   String?
+  managerId                    String?
+
+  createdById                  String?
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
+
+  user                         User?                  @relation(fields: [userId], references: [id])
+  department                   Department?            @relation(fields: [departmentId], references: [id])
+  position                     Position?              @relation(fields: [positionId], references: [id])
+  grade                        Grade?                 @relation(fields: [gradeId], references: [id])
+  location                     Location?              @relation(fields: [locationId], references: [id])
+  manager                      Employee?              @relation("EmployeeHierarchy", fields: [managerId], references: [id])
+  directReports                Employee[]             @relation("EmployeeHierarchy")
+
+  agreements                   EmploymentAgreement[]
+  reportingHistory             ReportingAssignmentHistory[]
+  documents                    EmployeeDocument[]
+  onboardingTasks              OnboardingTask[]
+  ictAccessRequests            IctAccessRequest[]
+  probationRecords             ProbationRecord[]
+  changeRequests               EmployeeChangeRequest[]
+  lifecycleEvents              LifecycleEvent[]
+
+  leaveBalances                LeaveBalance[]
+  leaveLedgerEntries           LeaveLedgerEntry[]
+  leaveRequests                LeaveRequest[]                 @relation("EmployeeLeaveRequests")
+  handoverRequests             LeaveRequest[]                 @relation("LeaveHandover")
+  scheduleAssignments          EmployeeScheduleAssignment[]
+  scheduleExceptions           ScheduleException[]
+  absences                     AbsenceRecord[]
+
+  // Phase 4 Relations
+  policyAcknowledgements       PolicyAcknowledgement[]
+  trainingAssignments          TrainingAssignment[]
+  phishingSimulations          PhishingSimulationRecord[]
+  surveys                      PostRecruitmentSurvey[]
+  transfers                    EmployeeTransfer[]
+  separation                   EmployeeSeparation?
+
+  // Phase 5 Relations
+  performanceObjectiveSets     PerformanceObjectiveSet[]
+  performanceAppraisals        PerformanceAppraisal[]         @relation("EmployeeAppraisals")
+  managedAppraisals            PerformanceAppraisal[]         @relation("ManagerAppraisals")
+  developmentPlans             DevelopmentPlan[]
+  performanceImprovementPlans  PerformanceImprovementPlan[]
+
+  // Phase 6 Relations (Configurable Payroll & Remuneration)
+  salaryAssignments            EmployeeSalaryAssignment[]
+  payrollSlips                 PayrollSlip[]
+
+  // Phase 7 Relations (Privacy DSR & Legal Holds)
+  dsrRequests                  PrivacyDataSubjectRequest[]
+  legalHolds                   PrivacyLegalHold[]
+
+  @@index([status])
+  @@index([managerId])
+  @@index([departmentId])
+}
+
+// Effective-dated employment agreement. Rows are never edited in place for material
+// changes: a new version is created and the prior one is SUPERSEDED with effectiveTo.
+model EmploymentAgreement {
+  id                       String    @id @default(uuid())
+  employeeId               String
+  version                  Int       @default(1)
+  employmentCategoryCode   String
+  startDate                DateTime
+  endDate                  DateTime?
+  probationStartDate       DateTime?
+  probationEndDate         DateTime?
+  probationExtendedEndDate DateTime?
+  noticePeriodDays         Int?      // D-20 open: only from contract/approved category
+  noticeTermsReference     String?   // contract clause reference
+  remunerationReference    String?   // reference only; no payroll values in R1
+  jobTitle                 String
+  departmentId             String
+  positionId               String?
+  gradeId                  String?
+  locationId               String?
+  workScheduleReference    String?
+  status                   String    @default("ACTIVE") // ACTIVE, SUPERSEDED, ENDED
+  documentRecordId         String?
+  effectiveFrom            DateTime  @default(now())
+  effectiveTo              DateTime?
+  changeReason             String?
+  changedById              String?
+  approvalReference        String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  employee                 Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, status])
+}
+
+// Effective-dated manager/department/position history. Closed rows are immutable.
+model ReportingAssignmentHistory {
+  id                String    @id @default(uuid())
+  employeeId        String
+  managerId         String?
+  departmentId      String
+  positionId        String?
+  locationId        String?
+  effectiveFrom     DateTime  @default(now())
+  effectiveTo       DateTime?
+  reason            String?
+  changedById       String
+  approvalReference String?   // change request id / approver
+  createdAt         DateTime  @default(now())
+
+  employee          Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, effectiveTo])
+}
+
+model EmployeeDocument {
+  id                 String          @id @default(uuid())
+  employeeId         String
+  documentType       String          // CONTRACT, JOB_DESCRIPTION, ID_EVIDENCE, STATUTORY_FORM, QUALIFICATION, MEDICAL, PROBATION_FORM, ONBOARDING_EVIDENCE, OTHER
+  documentRecordId   String
+  version            Int             @default(1)
+  supersedesId       String?
+  status             String          @default("ACTIVE") // ACTIVE, EXPIRED, SUPERSEDED, ARCHIVED
+  visibility         String          @default("HR_AND_EMPLOYEE") // HR_AND_EMPLOYEE, HR_EMPLOYEE_MANAGER, HR_ONLY, MEDICAL_RESTRICTED
+  issueDate          DateTime?
+  expiryDate         DateTime?
+  reminderDaysBefore Int?            // NULL = no reminder rule (no invented default)
+  lastReminderAt     DateTime?
+  ownerUserId        String?         // accountable owner (HR officer)
+  uploadedById       String
+  verificationStatus String          @default("PENDING") // PENDING, VERIFIED, REJECTED
+  verifiedById       String?
+  verifiedAt         DateTime?
+  notes              String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  employee           Employee        @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  documentRecord     DocumentRecord  @relation(fields: [documentRecordId], references: [id], onDelete: Restrict)
+  exceptions         DocumentException[]
+
+  @@index([employeeId, status])
+  @@index([expiryDate])
+}
+
+model DocumentException {
+  id                 String           @id @default(uuid())
+  employeeDocumentId String
+  exceptionType      String           // EXPIRING_SOON, EXPIRED
+  status             String           @default("OPEN") // OPEN, RESOLVED
+  detectedAt         DateTime         @default(now())
+  dedupeKey          String           @unique
+  resolvedAt         DateTime?
+  resolvedById       String?
+  resolutionNotes    String?
+
+  employeeDocument   EmployeeDocument @relation(fields: [employeeDocumentId], references: [id], onDelete: Restrict)
+}
+
+// Configurable onboarding checklist template by category / department / location / position.
+model OnboardingTemplate {
+  id                     String    @id @default(uuid())
+  code                   String    @unique
+  name                   String
+  employmentCategoryCode String?
+  departmentId           String?
+  locationId             String?
+  positionId             String?
+  status                 String    @default("DRAFT") // DRAFT, ACTIVE, INACTIVE
+  sourceReference        String
+  createdById            String
+  approvedById           String?
+  approvedAt             DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  items                  OnboardingTemplateItem[]
+}
+
+model OnboardingTemplateItem {
+  id                       String             @id @default(uuid())
+  templateId               String
+  title                    String
+  description              String?
+  ownerType                String             // HR, MANAGER, EMPLOYEE, ICT
+  dueDaysAfterStart        Int?               // NULL = no due date configured
+  evidenceRequired         Boolean            @default(false)
+  escalateAfterDaysOverdue Int?               // NULL = escalate as soon as overdue
+  escalateToRoleKey        String?
+  policyAcknowledgementRef String?            // reference only; acknowledgement logic belongs to policy module
+  sourceReference          String?
+  sortOrder                Int                @default(0)
+
+  template                 OnboardingTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+}
+
+model OnboardingTask {
+  id                       String    @id @default(uuid())
+  employeeId               String
+  templateId               String?
+  templateItemId           String?
+  taskTitle                String
+  description              String?
+  ownerType                String    // HR, MANAGER, EMPLOYEE, ICT
+  assignedRoleKey          String?
+  assignedUserId           String?
+  dueDate                  DateTime?
+  evidenceRequired         Boolean   @default(false)
+  escalateAfterDaysOverdue Int?
+  escalateToRoleKey        String?
+  policyAcknowledgementRef String?
+  status                   String    @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, WAIVED
+  completedAt              DateTime?
+  completedById            String?
+  completionNotes          String?
+  evidenceDocumentId       String?   // EmployeeDocument.id
+  waiverReason             String?
+  escalated                Boolean   @default(false)
+  escalatedAt              DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  employee                 Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, status])
+  @@index([status, dueDate])
+}
+
+// The HR platform TRACKS ICT joiner/mover/leaver requests. It does not provision identity
+// or endpoint controls (no approved integration exists).
+model IctAccessRequest {
+  id                 String    @id @default(uuid())
+  employeeId         String
+  requestType        String    @default("JOINER") // JOINER, MOVER, LEAVER
+  accessProfile      String
+  startDate          DateTime?
+  managerEmployeeId  String?
+  roleTitle          String?
+  status             String    @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, REJECTED
+  requestedById      String
+  requestedAt        DateTime  @default(now())
+  assignedIctUserId  String?
+  completedById      String?
+  completedAt        DateTime?
+  completionNotes    String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  employee           Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+}
+
+// Configurable probation objective form (source: Probation Period Objective Form).
+model ProbationFormTemplate {
+  id              String    @id @default(uuid())
+  code            String
+  version         Int       @default(1)
+  name            String
+  values          String    // JSON array of value names
+  ratingScale     String    // JSON array of rating labels
+  status          String    @default("ACTIVE") // DRAFT, ACTIVE, SUPERSEDED
+  sourceReference String
+  createdAt       DateTime  @default(now())
+
+  @@unique([code, version])
+}
+
+model ProbationRecord {
+  id                     String    @id @default(uuid())
+  employeeId             String
+  supervisorEmployeeId   String?
+  formTemplateId         String?
+  employmentCategoryCode String?
+  probationStartDate     DateTime
+  probationEndDate       DateTime
+  extendedEndDate        DateTime?
+  status                 String    @default("IN_PROGRESS") // IN_PROGRESS, OBJECTIVES_SET, ASSESSED, DECIDED
+  objectives             String?   // JSON [{objective, expectedOutput, achievementStatus?}]
+  supportRequired        String?
+  objectivesSetById      String?
+  objectivesSetAt        DateTime?
+  employeeAcknowledgedAt DateTime?
+  employeeComments       String?
+  valuesAssessment       String?   // JSON [{valueName, rating, evidenceComments}]
+  supervisorComments     String?
+  hrComments             String?
+  recommendation         String?   // CONFIRM, EXTEND, TERMINATE
+  recommendationReason   String?
+  proposedExtensionEnd   DateTime?
+  recommendedById        String?
+  recommendedAt          DateTime?
+  policyReviewRequired   Boolean   @default(false)
+  policyReviewedById     String?
+  policyReviewedAt       DateTime?
+  policyReviewNotes      String?
+  decision               String?   // CONFIRMED, EXTENDED, TERMINATION_APPROVED
+  decisionById           String?
+  decisionAt             DateTime?
+  decisionReason         String?
+  supportingDocumentId   String?
+  reminderSentAt         DateTime?
+  createdById            String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  employee               Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([status, probationEndDate])
+}
+
+// Material and personal change requests. Previous values are snapshotted on submission.
+model EmployeeChangeRequest {
+  id               String    @id @default(uuid())
+  employeeId       String
+  changeType       String    // PERSONAL, EMPLOYMENT, MANAGER, DEPARTMENT, TRANSFER
+  source           String    @default("HR") // HR, SELF_SERVICE
+  requestedChanges String    // JSON
+  previousValues   String    // JSON snapshot at submission
+  effectiveDate    DateTime
+  reason           String
+  status           String    @default("PENDING") // PENDING, APPROVED_SCHEDULED, APPLIED, REJECTED, CANCELLED
+  requestedById    String
+  reviewedById     String?
+  reviewedAt       DateTime?
+  reviewComments   String?
+  appliedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  employee         Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([status, effectiveDate])
+}
+
+// Lifecycle event outbox: the stable interface for future leave, payroll and access
+// modules. Phase 2 only PUBLISHES events; no consumer logic is implemented here.
+model LifecycleEvent {
+  id            String    @id @default(uuid())
+  employeeId    String
+  eventType     String    // EMPLOYEE_CREATED, STATUS_CHANGED, TRANSFERRED, MANAGER_CHANGED, EMPLOYMENT_CHANGED, PERSONAL_DETAILS_CHANGED, ONBOARDING_COMPLETED, PROBATION_CONFIRMED, PROBATION_EXTENDED, PROBATION_TERMINATION_APPROVED, EMPLOYEE_DEACTIVATED
+  effectiveDate DateTime
+  payload       String    // JSON (never contains sensitive identifiers)
+  sourceType    String
+  sourceId      String?
+  actorUserId   String
+  reason        String?
+  createdAt     DateTime  @default(now())
+
+  employee      Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, eventType])
+}
+
+
+// -------------------------------------------------------------
+// PHASE 3: LEAVE, WORKING ARRANGEMENTS, ABSENCE & LEDGER
+// -------------------------------------------------------------
+
+// Configurable Leave Type
+// Statutory floors are enforced separately from company enhancements (precedence framework).
+// Open decisions (D-01, D-03, D-04, D-05, D-06, D-07, D-08, D-19) are configured with
+// safe guardrails and decision references.
+model LeaveType {
+  id                         String    @id @default(uuid())
+  code                       String    @unique // e.g. ANNUAL, SICK, MATERNITY, PATERNITY, COMPASSIONATE, STUDY, UNPAID
+  name                       String
+  description                String?
+  category                   String    @default("COMPANY_ENHANCED") // STATUTORY, COMPANY_ENHANCED, OPERATIONAL
+  isPaid                     Boolean   @default(true)
+  requiresEvidence           Boolean   @default(false)
+  evidenceType               String?   // MEDICAL, BIRTH_CERTIFICATE, ADOPTION_ORDER, EXAM_TIMETABLE, DEATH_CERTIFICATE
+  minServiceMonthsRequired   Int?      // e.g. 2 months for statutory sick leave under Kenya Employment Act
+  noticeDaysRequired         Int?      // e.g. 14 days for planned annual leave; 0 for emergency
+  handoverRequired           Boolean   @default(true) // Planned leaves require handover; sick/emergency are exempt
+  maxConsecutiveDays         Int?
+  allowHalfDay               Boolean   @default(true)
+  negativeBalancePolicy      String    @default("PROHIBITED") // PROHIBITED, ALLOWED_WITH_LIMIT
+  maxNegativeBalanceDays     Float     @default(0.0)
+  accrualMethod              String    @default("MONTHLY_ACCRUAL") // MONTHLY_ACCRUAL, ANNUAL_FRONTLOAD, SERVICE_TIERED, NONE
+  statutoryFloorDays         Float?    // Kenya statutory baseline (e.g. 21.0 for annual, 90.0 for maternity, 14.0 for paternity)
+  defaultEntitlementDays     Float?    // Configured firm entitlement (e.g. 21.0 annual, 120.0 maternity per D-04)
+  allowCarryForward          Boolean   @default(false)
+  maxCarryForwardDays        Float?
+  carryForwardExpiryMonths   Int?      // Months after year-end before carry-forward expires
+  allowEncashment            Boolean   @default(false)
+  isActive                   Boolean   @default(true)
+  effectiveFrom              DateTime  @default(now())
+  effectiveTo                DateTime?
+  approvalWorkflowCode       String    @default("LEAVE_STANDARD")
+  decisionReference          String?   // e.g. "D-01, D-04, D-05"
+  createdById                String
+  approvedById               String?
+  approvedAt                 DateTime?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+
+  ledgerEntries              LeaveLedgerEntry[]
+  balances                   LeaveBalance[]
+  requests                   LeaveRequest[]
+  reservations               LeaveReservation[]
+}
+
+// Kenya Gazetted & Firm Public Holidays
+model PublicHoliday {
+  id              String   @id @default(uuid())
+  name            String
+  date            DateTime // Date of holiday
+  year            Int
+  isHalfDay       Boolean  @default(false)
+  locationId      String?  // null = nationwide / all locations
+  sourceReference String   // e.g. "Kenya Public Holidays Act / Gazette Notice"
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([date, locationId])
+}
+
+// Work Schedules & Working Time Expectations (D-10)
+model WorkSchedule {
+  id                   String    @id @default(uuid())
+  code                 String    @unique // e.g. STD_MON_FRI, STD_MON_SAT
+  name                 String
+  workingDays          String    // JSON array e.g. ["Monday","Tuesday","Wednesday","Thursday","Friday"]
+  restDays             String    // JSON array e.g. ["Saturday","Sunday"]
+  dailyWorkingHours    Float     @default(8.0)
+  flexitimeWindowStart String?   // e.g. "07:30"
+  flexitimeWindowEnd   String?   // e.g. "18:00"
+  coreHoursStart       String?   // e.g. "09:00"
+  coreHoursEnd         String?   // e.g. "16:00"
+  breakMinutes         Int       @default(60)
+  isActive             Boolean   @default(true)
+  effectiveFrom        DateTime  @default(now())
+  effectiveTo          DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  assignments          EmployeeScheduleAssignment[]
+}
+
+// Employee Schedule Assignment with effective dating
+model EmployeeScheduleAssignment {
+  id             String       @id @default(uuid())
+  employeeId     String
+  workScheduleId String
+  effectiveFrom  DateTime     @default(now())
+  effectiveTo    DateTime?
+  reason         String?
+  createdById    String
+  createdAt      DateTime     @default(now())
+
+  employee       Employee     @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  workSchedule   WorkSchedule @relation(fields: [workScheduleId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, effectiveTo])
+}
+
+// Schedule Exceptions (Rosters, remote work exceptions)
+model ScheduleException {
+  id            String    @id @default(uuid())
+  employeeId    String
+  exceptionType String    // REMOTE_WORK, ROSTER_SHIFT, REST_DAY_SWAP
+  startDate     DateTime
+  endDate       DateTime
+  reason        String
+  status        String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  approvedById  String?
+  approvedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  employee      Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, startDate, endDate])
+}
+
+// Authoritative Leave Ledger (Append-Only, Immutable)
+// Transactions represent economic events: OPENING_BALANCE, ACCRUAL, LEAVE_TAKEN,
+// ADJUSTMENT, REVERSAL, CARRY_FORWARD, EXPIRY, ENCASHMENT.
+// Once posted, rows are NEVER modified or deleted. Corrections are posted as ADJUSTMENT or REVERSAL.
+model LeaveLedgerEntry {
+  id                 String    @id @default(uuid())
+  employeeId         String
+  leaveTypeId        String
+  leaveYear          Int
+  entryType          String    // OPENING_BALANCE, ACCRUAL, LEAVE_TAKEN, ADJUSTMENT, REVERSAL, CARRY_FORWARD, EXPIRY, ENCASHMENT
+  amountDays         Float     // Positive = Credit/Addition; Negative = Debit/Deduction
+  runningBalanceDays Float
+  sourceType         String    // LEAVE_REQUEST, ACCRUAL_JOB, MANUAL_ADJUSTMENT, YEAR_END_CLOSE
+  sourceId           String?
+  policyVersionId    String?
+  notes              String?
+  calculationDetails String?   // JSON object: inputs, rates, schedule used, statutory comparison
+  actorUserId        String
+  createdAt          DateTime  @default(now())
+
+  employee           Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  leaveType          LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, leaveTypeId, leaveYear])
+  @@index([createdAt])
+}
+
+// Materialised Leave Balance Projection
+// Reconciles 100% to LeaveLedgerEntry sums.
+// Tracks pendingReservedDays so pending requests reserve balance and prevent concurrent double-booking.
+model LeaveBalance {
+  id                  String    @id @default(uuid())
+  employeeId          String
+  leaveTypeId         String
+  leaveYear           Int
+  entitlementDays     Float     @default(0.0)
+  accruedDays         Float     @default(0.0)
+  takenDays           Float     @default(0.0)
+  pendingReservedDays Float     @default(0.0) // Reserved by pending requests; not yet debited to ledger
+  adjustedDays        Float     @default(0.0)
+  carriedForwardDays  Float     @default(0.0)
+  closingBalanceDays  Float     @default(0.0) // (accrued + carriedForward + adjusted - taken)
+  updatedAt           DateTime  @updatedAt
+
+  employee            Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  leaveType           LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+
+  @@unique([employeeId, leaveTypeId, leaveYear])
+  @@index([employeeId, leaveYear])
+}
+
+// Leave Request
+model LeaveRequest {
+  id                   String    @id @default(uuid())
+  requestNumber        String    @unique // e.g. LV-2026-0001
+  employeeId           String
+  leaveTypeId          String
+  startDate            DateTime
+  endDate              DateTime
+  isHalfDay            Boolean   @default(false)
+  halfDayType          String?   // MORNING, AFTERNOON
+  calendarDays         Int
+  workingDaysDeducted  Float
+  deductionBreakdown   String    // JSON: calendarDays, holidaysExcluded, restDaysExcluded, netWorkingDays
+  handoverEmployeeId   String?
+  handoverNotes        String?
+  handoverCompleted    Boolean   @default(false)
+  reason               String?   // Confidential; hidden from team calendars
+  evidenceDocumentId   String?   // Reference to EmployeeDocument (medical, birth, etc.)
+  status               String    @default("PENDING_APPROVAL") // PENDING_APPROVAL, APPROVED, REJECTED, RETURNED_FOR_EDIT, CANCELLED, WITHDRAWN
+  submittedAt          DateTime  @default(now())
+  approvedAt           DateTime?
+  approvedById         String?
+  rejectionReason      String?
+  cancellationReason   String?
+  cancelledAt          DateTime?
+  cancelledById        String?
+  isRetrospective      Boolean   @default(false)
+  retrospectiveReason  String?
+  workflowInstanceId   String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  employee             Employee  @relation("EmployeeLeaveRequests", fields: [employeeId], references: [id], onDelete: Restrict)
+  handoverEmployee     Employee? @relation("LeaveHandover", fields: [handoverEmployeeId], references: [id], onDelete: Restrict)
+  leaveType            LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+  reservations         LeaveReservation[]
+
+  @@index([employeeId, status])
+  @@index([startDate, endDate])
+}
+
+// Atomic Leave Reservation
+// Created on submission; holds days against balance.
+// COMMITTED_TO_LEDGER on approval; RELEASED on rejection/cancellation.
+model LeaveReservation {
+  id             String       @id @default(uuid())
+  leaveRequestId String
+  employeeId     String
+  leaveTypeId    String
+  leaveYear      Int
+  reservedDays   Float
+  status         String       @default("ACTIVE") // ACTIVE, COMMITTED_TO_LEDGER, RELEASED
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  leaveRequest   LeaveRequest @relation(fields: [leaveRequestId], references: [id], onDelete: Cascade)
+  leaveType      LeaveType    @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, leaveTypeId, status])
+}
+
+// Unexpected Absence Record (D-11)
+// Absence is tracked with reasons and follow-up without automatic misconduct/termination sanctions.
+model AbsenceRecord {
+  id                   String    @id @default(uuid())
+  employeeId           String
+  startDate            DateTime
+  endDate              DateTime?
+  reasonCategory       String    // SICKNESS, FAMILY_EMERGENCY, UNNOTIFIED, MEDICAL_APPOINTMENT, OTHER
+  contactChannel       String    // PHONE, EMAIL, SMS, WHATSAPP, RELATIVE
+  reportedAt           DateTime  @default(now())
+  reportedBy           String
+  notes                String?
+  status               String    @default("RECORDED") // RECORDED, RETROSPECTIVE_LEAVE_REQUESTED, EXCUSED, INVESTIGATION_REQUIRED
+  linkedLeaveRequestId String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  employee             Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, startDate])
+}
+
+
+// -------------------------------------------------------------
+// PHASE 4: GOVERNANCE, EMPLOYEE RELATIONS, TRANSFER & SEPARATION
+// -------------------------------------------------------------
+
+// 1. Policy Register and Version Acknowledgement
+model PolicyDocument {
+  id             String          @id @default(uuid())
+  code           String          @unique // e.g. POL-CYBER-001, POL-CODE-001
+  title          String
+  owner          String          // "Human Resources", "Compliance", "Operations"
+  targetAudience String          // ALL_STAFF, MANAGERS, PARTNERS, CONSULTING, SUPPORT
+  category       String          // INFORMATION_SECURITY, CODE_OF_CONDUCT, OSH, DEI, ANTI_HARASSMENT, OPERATIONAL
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  versions       PolicyVersion[]
+}
+
+model PolicyVersion {
+  id               String                  @id @default(uuid())
+  policyId         String
+  versionNumber    String                  // e.g. "1.0", "1.1"
+  contentSummary   String
+  documentId       String?                 // Reference to DocumentRecord in vault
+  effectiveDate    DateTime
+  reviewDate       DateTime?
+  status           String                  @default("DRAFT") // DRAFT, IN_REVIEW, APPROVED, PUBLISHED, SUPERSEDED, ARCHIVED
+  sourceReference  String                  // e.g. "Combined Company Policies §4.1"
+  isImmutable      Boolean                 @default(false)
+  createdById      String?   // Published versions cannot be edited in place
+  publishedAt      DateTime?
+  publishedById    String?
+  approvedAt       DateTime?
+  approvedById     String?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  policy           PolicyDocument          @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  acknowledgements PolicyAcknowledgement[]
+
+  @@unique([policyId, versionNumber])
+}
+
+model PolicyAcknowledgement {
+  id                 String        @id @default(uuid())
+  policyVersionId    String        // Strictly bound to the exact version accepted!
+  employeeId         String
+  status             String        @default("PENDING") // PENDING, ACKNOWLEDGED, REFUSED, EXEMPTED
+  acknowledgedAt     DateTime?
+  ipAddress          String?
+  userAgent          String?
+  evidenceDocumentId String?
+  refusalReason      String?
+  hrFollowUpNotes    String?
+  remindedAt         DateTime?
+  reminderCount      Int           @default(0)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  policyVersion      PolicyVersion @relation(fields: [policyVersionId], references: [id], onDelete: Restrict)
+  employee           Employee      @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@unique([policyVersionId, employeeId])
+  @@index([employeeId, status])
+}
+
+// 2. Training Administration (not an LMS)
+model TrainingProgramme {
+  id                     String               @id @default(uuid())
+  code                   String               @unique // e.g. TRN-CYBER-IND, TRN-DEI-ANN
+  name                   String
+  category               String               // CYBERSECURITY_INDUCTION, ANNUAL_AWARENESS, ROLE_SPECIFIC, PHISHING_SIMULATION, DEI, HARASSMENT_PREVENTION, OSH
+  recurrence             String?              // ONBOARDING_ONLY, ANNUAL, QUARTERLY, MONTHLY
+  dueDaysAfterAssignment Int?
+  isOpenDecisionTypo     Boolean              @default(false) // D-15 / D-16: Flag for "14c days" open decision
+  decisionReference      String?              // e.g. "D-15"
+  status                 String               @default("ACTIVE") // ACTIVE, INACTIVE, DRAFT
+  description            String?
+  provider               String?
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+
+  assignments            TrainingAssignment[]
+}
+
+model TrainingAssignment {
+  id                 String            @id @default(uuid())
+  programmeId        String
+  employeeId         String
+  assignedAt         DateTime          @default(now())
+  dueDate            DateTime
+  status             String            @default("ASSIGNED") // ASSIGNED, IN_PROGRESS, COMPLETED, OVERDUE, WAIVED, REMEDIAL_REQUIRED
+  completedAt        DateTime?
+  scorePercent       Float?
+  passed             Boolean?
+  evidenceDocumentId String?
+  certificateNumber  String?
+  remedialAction     String?
+  remedialNotes      String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  programme          TrainingProgramme @relation(fields: [programmeId], references: [id], onDelete: Restrict)
+  employee           Employee          @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, status])
+  @@index([programmeId, dueDate])
+}
+
+model SecurityCommunicationLog {
+  id        String   @id @default(uuid())
+  subject   String
+  channel   String   @default("EMAIL") // EMAIL, ALL_HANDS, INTRANET, SLACK
+  sentAt    DateTime @default(now())
+  audience  String   // ALL_STAFF, CONSULTING, SUPPORT
+  reference String?  // e.g. "Monthly Security Awareness Bulletin #11"
+  sentById  String
+  createdAt DateTime @default(now())
+}
+
+model PhishingSimulationRecord {
+  id                       String   @id @default(uuid())
+  campaignName             String
+  simulationDate           DateTime
+  employeeId               String
+  payloadType              String   // CREDENTIAL_HARVEST, MALICIOUS_ATTACHMENT, URGENT_TRANSFER
+  clickedLink              Boolean  @default(false)
+  submittedCredentials     Boolean  @default(false)
+  reportedPhish            Boolean  @default(false)
+  remedialTrainingAssigned Boolean  @default(false)
+  createdAt                DateTime @default(now())
+
+  employee                 Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, simulationDate])
+}
+
+// 3. Workforce Requisition and Recruitment Feedback (Forms 1 & 2)
+model StaffRequisition {
+  id                      String     @id @default(uuid())
+  requisitionNumber       String     @unique // e.g. REQ-2026-0001
+  departmentId            String
+  positionTitle           String
+  gradeId                 String?
+  locationId              String?
+  headcount               Int        @default(1)
+  reason                  String     // REPLACEMENT, NEW_HEADCOUNT, CAPACITY_EXPANSION
+  vacancyDuration         String     // PERMANENT, FIXED_TERM, CONTRACT
+  proposedStartDate       DateTime?
+  reportingToPosition     String?
+  jobDescription          String
+  keyResponsibilities     String
+  requiredSkills          String
+  objectives              String?
+  teamChallenges          String?
+  budgetContext           String?    // Budgeted / P&L context
+  status                  String     @default("DRAFT") // DRAFT, SUBMITTED, LINE_MANAGER_APPROVED, HR_APPROVED, GM_APPROVED, REJECTED, CANCELLED
+  currentStage            String     @default("DRAFT")
+  lineManagerApprovedAt   DateTime?
+  lineManagerApprovedById String?
+  hrApprovedAt            DateTime?
+  hrApprovedById          String?
+  gmApprovedAt            DateTime?
+  gmApprovedById          String?
+  rejectionReason         String?
+  createdById             String
+  createdAt               DateTime   @default(now())
+  updatedAt               DateTime   @updatedAt
+
+  department              Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+}
+
+model PostRecruitmentSurvey {
+  id                       String    @id @default(uuid())
+  requisitionId            String?
+  candidateRef             String?   // Anonymized candidate reference (e.g. CAND-8291)
+  hiringManagerId          String
+  completedAt              DateTime  @default(now())
+  roleClarityRating        Int?      // 1-5
+  processSpeedRating       Int?      // 1-5
+  candidateQualityRating   Int?      // 1-5
+  communicationRating      Int?      // 1-5
+  overallExperienceRating  Int?      // 1-5
+  comments                 String?
+  privacySafe              Boolean   @default(true)
+  createdAt                DateTime  @default(now())
+
+  hiringManager            Employee  @relation(fields: [hiringManagerId], references: [id], onDelete: Restrict)
+
+  @@index([hiringManagerId])
+}
+
+// 4. Employee Transfer
+model EmployeeTransfer {
+  id                          String    @id @default(uuid())
+  transferNumber              String    @unique // e.g. TRF-2026-0001
+  employeeId                  String
+  currentDepartmentId         String
+  currentPositionId           String
+  currentLocationId           String?
+  currentManagerId            String?
+  proposedDepartmentId        String
+  proposedPositionId          String
+  proposedLocationId          String?
+  proposedManagerId           String?
+  reason                      String
+  compensationGradeReviewNotes String?
+  handoverRequired            Boolean   @default(true)
+  handoverNotes               String?
+  handoverCompleted           Boolean   @default(false)
+  effectiveDate               DateTime
+  status                      String    @default("PENDING_APPROVAL") // PENDING_APPROVAL, APPROVED, REJECTED, EFFECTIVE, CANCELLED
+  approvedAt                  DateTime?
+  approvedById                String?
+  rejectionReason             String?
+  // MANDATORY POLICY RULE: Transfer leave carry-over rule is blocked from activation pending legal/HR validation
+  leaveBalanceCarryOverPolicy String    @default("BLOCKED_PENDING_CONFIRMATION")
+  ictMoverTaskId              String?
+  createdById                 String
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
+
+  employee                    Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, status])
+}
+
+// 5. Employee Relations Secure Case Foundation (EXTREMELY SENSITIVE)
+// Generic HR case list visible to all HR staff is strictly PROHIBITED.
+model ErCase {
+  id                            String                 @id @default(uuid())
+  caseNumber                    String                 @unique // ER-DISC-2026-0001, ER-GRIEV-2026-0001, ER-HARASS-2026-0001, ER-WB-2026-0001
+  caseType                      String                 // DISCIPLINARY, GRIEVANCE, HARASSMENT_DISCRIMINATION, WHISTLEBLOWING
+  title                         String                 // Generic non-identifying title
+  status                        String                 @default("INTAKE") // INTAKE, INVESTIGATION, HEARING, OUTCOME_PENDING, APPEAL, CLOSED
+  severity                      String                 @default("STANDARD") // STANDARD, HIGH, CRITICAL
+  primaryHandlerId              String?                // Designated Handler User ID
+  assignedInvestigatorId        String?                // Designated Investigator User ID
+  subjectEmployeeId             String?                // Employee under investigation
+  complainantEmployeeId         String?                // Complainant Employee (if non-anonymous)
+  isAnonymous                   Boolean                @default(false)
+  whistleblowerToken            String?                @unique // Token for anonymous tracking & messaging
+  encryptedWhistleblowerIdentity String?               // Stored encrypted; restricted to oversight officer
+  intakeChannel                 String                 @default("PORTAL") // PORTAL, DIRECT_REPORT, ANONYMOUS_INTAKE, HOTLINE
+  allegationSummary             String                 // Controlled narrative
+  policyClausesCited            String?                // e.g. "Code of Conduct §5.2"
+  safetySupportMeasures         String?                // For harassment/discrimination cases
+  antiRetaliationMonitoring     Boolean                @default(false)
+  closedAt                      DateTime?
+  closedById                    String?
+  closureSummary                String?
+  createdById                   String?
+  createdAt                     DateTime               @default(now())
+  updatedAt                     DateTime               @updatedAt
+
+  accessControls                ErCaseAccess[]
+  conflicts                     ErConflictDeclaration[]
+  evidence                      ErEvidenceDocument[]
+  hearings                      ErHearing[]
+  decisions                     ErCaseDecision[]
+  appeals                       ErAppeal[]
+  events                        ErCaseEvent[]
+
+  @@index([caseType, status])
+  @@index([primaryHandlerId])
+}
+
+model ErCaseAccess {
+  id               String    @id @default(uuid())
+  caseId           String
+  userId           String
+  role             String    // HANDLER, INVESTIGATOR, PANEL_MEMBER, APPEAL_OFFICER, OBSERVER
+  grantedAt        DateTime  @default(now())
+  grantedById      String
+  revokedAt        DateTime?
+  revocationReason String?
+
+  case             ErCase    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@unique([caseId, userId])
+  @@index([userId, revokedAt])
+}
+
+model ErConflictDeclaration {
+  id                    String    @id @default(uuid())
+  caseId                String
+  userId                String
+  natureOfConflict      String
+  handlerReassignedToId String?
+  declaredAt            DateTime  @default(now())
+  resolvedAt            DateTime?
+
+  case                  ErCase    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, userId])
+}
+
+model ErEvidenceDocument {
+  id                  String   @id @default(uuid())
+  caseId              String
+  documentId          String   // Reference to DocumentRecord in vault
+  category            String   // ALLEGATION, SHOW_CAUSE_NOTICE, RESPONSE, WITNESS_STATEMENT, INVESTIGATION_REPORT, HEARING_MINUTES, MEDICAL, SANCTION_LETTER, APPEAL_SUBMISSION
+  title               String
+  version             Int      @default(1)
+  uploadedById        String
+  isRestrictedMedical Boolean  @default(false)
+  createdAt           DateTime @default(now())
+
+  case                ErCase   @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, category])
+}
+
+model ErHearing {
+  id                  String    @id @default(uuid())
+  caseId              String
+  scheduledDate       DateTime
+  locationOrLink      String
+  noticeSentAt        DateTime?
+  companionAllowed    Boolean   @default(true)
+  companionName       String?
+  panelMemberUserIds  String    // JSON array of user IDs
+  status              String    @default("SCHEDULED") // SCHEDULED, CONCLUDED, ADJOURNED, CANCELLED
+  minutesDocumentId   String?
+  concludedAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  case                ErCase    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, scheduledDate])
+}
+
+model ErCaseDecision {
+  id                     String    @id @default(uuid())
+  caseId                 String
+  findings               String
+  sanction               String?   // WRITTEN_WARNING, FINAL_WARNING, SUSPENSION_WITH_PAY, RECOMMEND_DISMISSAL, NO_ACTION, INFORMAL_COUNSELING
+  sanctionDurationMonths Int?
+  appealDeadline         DateTime?
+  decidedById            String    // Authorised human decision-maker (NO automated decision!)
+  decisionDate           DateTime  @default(now())
+  createdAt              DateTime  @default(now())
+
+  case                   ErCase    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+}
+
+model ErAppeal {
+  id              String    @id @default(uuid())
+  caseId          String
+  submittedAt     DateTime  @default(now())
+  grounds         String
+  appealOfficerId String
+  status          String    @default("PENDING") // PENDING, UNDER_REVIEW, UPHELD, OVERTURNED, MODIFIED
+  outcome         String?
+  decidedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  case            ErCase    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+}
+
+model ErCaseEvent {
+  id            String   @id @default(uuid())
+  caseId        String
+  eventType     String   // INTAKE, ASSIGNED, SHOW_CAUSE_ISSUED, RESPONSE_RECEIVED, HEARING_HELD, DECISION_ISSUED, APPEAL_FILED, REASSIGNED_CONFLICT, CLOSED
+  description   String   // Sanitized non-identifying description
+  actorUserId   String?
+  actorRole     String?
+  correlationId String?
+  metadata      String?  // JSON string
+  createdAt     DateTime @default(now())
+
+  case          ErCase   @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, createdAt])
+}
+
+// 6. Separation and Exit
+model EmployeeSeparation {
+  id                          String                    @id @default(uuid())
+  employeeId                  String                    @unique
+  triggerType                 String                    // RESIGNATION, RETIREMENT, END_OF_CONTRACT, MUTUAL_SEPARATION, REDUNDANCY, SUMMARY_DISMISSAL, DISMISSAL_FOR_MISCONDUCT
+  reason                      String
+  sensitiveReasonCategory     String?                   // Sensitive category; hidden from general reporting
+  noticeDate                  DateTime
+  intendedLastDay             DateTime
+  effectiveDate               DateTime
+  noticeServedDays            Int
+  noticeRequiredDays          Int?
+  noticeWaived                Boolean                   @default(false)
+  payInLieuOfNotice           Boolean                   @default(false)
+  status                      String                    @default("INITIATED") // INITIATED, CLEARANCE_IN_PROGRESS, CLEARANCE_COMPLETE, SEPARATION_APPROVED, EXITED
+  accruedLeaveDaysPayable     Float                     @default(0.0)
+  finalDuesApproved           Boolean                   @default(false)
+  payrollReviewedAt           DateTime?
+  certificateOfServiceIssued  Boolean                   @default(false)
+  certificateNumber           String?
+  createdById                 String
+  createdAt                   DateTime                  @default(now())
+  updatedAt                   DateTime                  @updatedAt
+
+  employee                    Employee                  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  clearanceItems              SeparationClearanceItem[]
+  exitInterview               ExitInterview?
+
+  @@index([status])
+}
+
+model SeparationClearanceItem {
+  id                      String             @id @default(uuid())
+  separationId            String
+  departmentRole          String             // EMPLOYEE, LINE_MANAGER, ICT, FINANCE, HR
+  itemKey                 String             // RETURN_LAPTOP, DEACTIVATE_EMAIL_MFA, SETTLE_IMPREST, HANDOVER_CLIENT_FILES, EXIT_INTERVIEW
+  description             String
+  isCompleted             Boolean            @default(false)
+  completedAt             DateTime?
+  completedById           String?
+  hasFinancialDeduction   Boolean            @default(false)
+  proposedDeductionAmount Float?
+  // MANDATORY POLICY RULE: Clearance must NOT automatically withhold earned wages. Lawful basis and approval required.
+  deductionLawfulBasis    String?
+  deductionApproved       Boolean            @default(false)
+  notes                   String?
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+
+  separation              EmployeeSeparation @relation(fields: [separationId], references: [id], onDelete: Cascade)
+
+  @@index([separationId, departmentRole])
+}
+
+model ExitInterview {
+  id                    String             @id @default(uuid())
+  separationId          String             @unique
+  conductedAt           DateTime           @default(now())
+  conductedById         String
+  primaryReason         String
+  cultureRating         Int?               // 1-5
+  managementRating      Int?               // 1-5
+  compensationRating    Int?               // 1-5
+  confidentialComments  String             // RESTRICTED: Accessible only to HR Partner & Managing Partner
+  isRestricted          Boolean            @default(true)
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  separation            EmployeeSeparation @relation(fields: [separationId], references: [id], onDelete: Cascade)
+}
+
+// ============================================================================
+// PHASE 5 — PERFORMANCE, OBJECTIVES, DEVELOPMENT AND PIP (R2)
+// ============================================================================
+
+model PerformanceRatingScale {
+  id                  String   @id @default(uuid())
+  code                Int      @unique // 1..6
+  label               String   // "Too Early to Assess", "Unsatisfactory", "Developing", "Good", "Very Good", "Outstanding"
+  description         String
+  isNumericScore      Boolean  @default(true) // Rating 1 is false (excluded from averages/rankings)
+  guidancePercentage  Float    // 5%, 10%, 70%, 10%, 5% (guidance only, not quota)
+  version             Int      @default(1)
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model PerformanceCycle {
+  id                        String   @id @default(uuid())
+  title                     String   // e.g. "FY2026 Annual Performance Review"
+  cycleType                 String   // "ANNUAL", "QUARTERLY"
+  periodStart               DateTime
+  periodEnd                 DateTime
+  selfAppraisalDeadline     DateTime
+  managerReviewDeadline     DateTime
+  moderationDeadline        DateTime?
+  maxObjectivesGuideline    Int      @default(6) // Configurable up to 6 objectives guideline
+  allowPeerFeedback         Boolean  @default(false)
+  peerFeedbackPrivacyModel  String   @default("HR_RESTRICTED") // Documented model: restricted from reviewee, visible to HR
+  distributionGuidance      String   // JSON guidance percentages (e.g. {"5":5,"4":10,"3":70,"2":10,"1":5})
+  isDistributionMandatory   Boolean  @default(false) // Mandatory calibration constraint is FALSE by default
+  annualFormulaStatus       String   @default("PENDING_APPROVAL") // Formula unapproved; do not calculate misleading annual aggregate
+  annualFormulaModel        String?  // SIMPLE_AVERAGE, QUARTERLY_WEIGHTED, ANNUAL_ONLY, HYBRID_SPLIT
+  annualFormulaWeights      String?  // JSON string e.g. {"Q1":15,"Q2":20,"Q3":25,"Q4":40}
+  roundingMethod            String?  @default("NEAREST_HALF") // TWO_DECIMALS, NEAREST_HALF, NEAREST_INTEGER, FLOOR, CEIL
+  minCyclesRequired         Int?     @default(1)
+  formulaProposedById       String?
+  formulaProposedAt         DateTime?
+  formulaApprovedById       String?
+  formulaApprovedAt         DateTime?
+  configurationSnapshot     String   // Immutable JSON snapshot of exact cycle rules, weights, guidance
+  status                    String   @default("DRAFT") // DRAFT, ACTIVE, IN_REVIEW, MODERATION, CLOSED
+  createdById               String
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  objectiveSets             PerformanceObjectiveSet[]
+  appraisals                PerformanceAppraisal[]
+
+  @@index([status, cycleType])
+}
+
+model PerformanceObjectiveSet {
+  id                  String                 @id @default(uuid())
+  employeeId          String
+  cycleId             String?
+  title               String
+  version             Int                    @default(1)
+  status              String                 @default("DRAFT") // DRAFT, SUBMITTED, APPROVED, SUPERSEDED
+  amendmentReason     String?                // Required if amended after cycle start
+  isImmutable         Boolean                @default(false)
+  employeeSignOffAt   DateTime?
+  managerSignOffAt    DateTime?
+  hrSignOffAt         DateTime?
+  partnerSignOffAt    DateTime?
+  createdById         String
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  employee            Employee               @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  cycle               PerformanceCycle?      @relation(fields: [cycleId], references: [id], onDelete: SetNull)
+  objectives          PerformanceObjective[]
+
+  @@index([employeeId, status])
+}
+
+model PerformanceObjective {
+  id                     String                  @id @default(uuid())
+  objectiveSetId         String
+  title                  String                  // KPI description ("what")
+  kpi                    String                  // Target metric
+  behavioursAndValues    String                  // Behaviours / 6 Ndakala values ("how")
+  expectedDate           DateTime                // ("by when")
+  weightPercent          Float?                  // Optional weighting; if weighted, sum must equal 100
+  supportRequired        String?
+  isRealistic            Boolean                 @default(true)
+  supportAgreedDeadline  DateTime?
+  achievementStatus      String                  @default("NOT_STARTED") // NOT_STARTED, IN_PROGRESS, ACHIEVED, EXCEEDED, PARTIALLY_ACHIEVED, NOT_ACHIEVED
+  orderIndex             Int                     @default(0)
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+
+  objectiveSet           PerformanceObjectiveSet @relation(fields: [objectiveSetId], references: [id], onDelete: Cascade)
+  scores                 AppraisalObjectiveScore[]
+
+  @@index([objectiveSetId])
+}
+
+model PerformanceAppraisal {
+  id                            String                    @id @default(uuid())
+  cycleId                       String
+  employeeId                    String
+  managerId                     String
+  status                        String                    @default("DRAFT_SELF") // DRAFT_SELF, SUBMITTED_SELF, DRAFT_MANAGER, SUBMITTED_MANAGER, MEETING_COMPLETED, HR_MODERATED, PARTNER_APPROVED
+
+  // Self Appraisal Fields (at least two strengths and improvement areas required)
+  selfAchievements              String
+  selfStrengths                 String                    // JSON array of strings (min 2)
+  selfImprovementAreas          String                    // JSON array of strings (min 2)
+  selfChallenges                String?
+  selfSupportRequired           String?
+  selfSubmittedAt               DateTime?
+
+  // Manager Appraisal Fields (at least two strengths and improvement areas required)
+  managerAchievementsComments   String?
+  managerStrengths              String?                   // JSON array of strings (min 2)
+  managerImprovementAreas       String?                   // JSON array of strings (min 2)
+  managerGeneralComments        String?
+  managerRatingCode             Int?                      // 1..6 scale code
+  managerRatingLabel            String?
+  managerSubmittedAt            DateTime?
+
+  // Formal Review Meeting & Development Agreement
+  reviewMeetingDate             DateTime?
+  reviewMeetingNotes            String?
+  developmentAgreement          String?
+
+  // HR Moderation & Partner Sign-off
+  moderatedRatingCode           Int?
+  moderationNotes               String?
+  moderatedById                 String?
+  moderatedAt                   DateTime?
+  partnerApprovedById           String?
+  partnerApprovedAt             DateTime?
+
+  // Exact configuration snapshot used for this appraisal
+  ratingConfigurationSnapshot   String?                   // JSON
+  annualCompositeScore          Float?
+  annualCompositeRatingCode     Int?
+  annualCompositeFormulaUsed    String?
+
+  createdAt                     DateTime                  @default(now())
+  updatedAt                     DateTime                  @updatedAt
+
+  cycle                         PerformanceCycle          @relation(fields: [cycleId], references: [id], onDelete: Restrict)
+  employee                      Employee                  @relation("EmployeeAppraisals", fields: [employeeId], references: [id], onDelete: Restrict)
+  manager                       Employee                  @relation("ManagerAppraisals", fields: [managerId], references: [id], onDelete: Restrict)
+  objectiveScores               AppraisalObjectiveScore[]
+  peerFeedbacks                 PerformancePeerFeedback[]
+  developmentPlans              DevelopmentPlan[]
+
+  @@index([cycleId, status])
+  @@index([employeeId])
+  @@index([managerId])
+}
+
+model AppraisalObjectiveScore {
+  id                 String               @id @default(uuid())
+  appraisalId        String
+  objectiveId        String
+  employeeRating     Int?                 // 1..6
+  employeeComments   String?
+  managerRating      Int?                 // 1..6
+  managerComments    String?
+  achievementStatus  String?
+
+  appraisal          PerformanceAppraisal @relation(fields: [appraisalId], references: [id], onDelete: Cascade)
+  objective          PerformanceObjective @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+
+  @@unique([appraisalId, objectiveId])
+}
+
+model PerformancePeerFeedback {
+  id                                String               @id @default(uuid())
+  appraisalId                       String
+  requesterId                       String
+  peerEmployeeId                    String
+  feedbackText                      String
+  strengths                         String?
+  improvementAreas                  String?
+  isIdentityRestrictedFromReviewee  Boolean              @default(true) // Privacy model: identity restricted from reviewee, visible to HR moderator only
+  submittedAt                       DateTime?
+  createdAt                         DateTime             @default(now())
+
+  appraisal                         PerformanceAppraisal @relation(fields: [appraisalId], references: [id], onDelete: Cascade)
+
+  @@index([appraisalId])
+}
+
+model DevelopmentPlan {
+  id               String                 @id @default(uuid())
+  employeeId       String
+  appraisalId      String?
+  cycleId          String?
+  title            String
+  status           String                 @default("ACTIVE") // ACTIVE, COMPLETED, SUPERSEDED
+  createdById      String
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  employee         Employee               @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  appraisal        PerformanceAppraisal?  @relation(fields: [appraisalId], references: [id], onDelete: SetNull)
+  actions          DevelopmentAction[]
+
+  @@index([employeeId, status])
+}
+
+model DevelopmentAction {
+  id                          String          @id @default(uuid())
+  developmentPlanId           String
+  objective                   String
+  actionDescription           String
+  ownerEmployeeId             String
+  supportRequired             String?
+  targetDate                  DateTime
+  evidence                    String?
+  isCompleted                 Boolean         @default(false)
+  completedAt                 DateTime?
+  linkedTrainingProgrammeId   String?
+  linkedTrainingAssignmentId  String?
+  createdAt                   DateTime        @default(now())
+  updatedAt                   DateTime        @updatedAt
+
+  developmentPlan             DevelopmentPlan @relation(fields: [developmentPlanId], references: [id], onDelete: Cascade)
+
+  @@index([developmentPlanId])
+}
+
+model PerformanceImprovementPlan {
+  id                      String      @id @default(uuid())
+  pipNumber               String      @unique // PIP-2026-0001
+  employeeId              String
+  lineManagerId           String
+  hrLeadId                String
+  triggerReason           String      // FIRST_TIME_RATING_2, CONSECUTIVE_RATING_2, RATING_2_WHILE_ON_PIP, RATING_3_INSUFFICIENT_IMPROVEMENT, CAPABILITY_DEFICIT
+  durationMonths          Int         // 1 to 3 months (max 3 per approved policy)
+  startDate               DateTime
+  endDate                 DateTime
+  template                String      @default("STANDARD_CAPABILITY")
+  baselineAssessment      String
+  smartTargets            String      // JSON array [{target, measurement, supportRequired, dueDate}]
+  supportAndTrainingNotes String?
+  employeeComments        String?
+  employeeAcknowledgedAt  DateTime?
+  employeeRefusalToSign   Boolean     @default(false)
+  refusalReason           String?
+  status                  String      @default("ACTIVE") // ACTIVE, EXTENDED, SUCCESSFUL_COMPLETION, FORMAL_HEARING_REFERRED, FURTHER_REVIEW
+  outcomeRecommendation   String?     // CLEARANCE, FURTHER_REVIEW, REFERRAL_TO_FAIR_HEARING
+  outcomeNotes            String?
+  isCapabilityProcess     Boolean     @default(true) // Explicit rule: capability process, NEVER disciplinary misconduct
+  decidedById             String?     // Human authority only
+  decidedAt               DateTime?
+  createdAt               DateTime    @default(now())
+  updatedAt               DateTime    @updatedAt
+
+  employee                Employee    @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  checkIns                PipCheckIn[]
+
+  @@index([employeeId, status])
+}
+
+model PipCheckIn {
+  id                      String                     @id @default(uuid())
+  pipId                   String
+  checkInMonth            Int                        // 1, 2, or 3
+  scheduledDate           DateTime
+  conductedDate           DateTime?
+  managerReviewEvidence   String
+  progressStatus          String                     // SATISFACTORY, PARTIAL, UNSATISFACTORY
+  employeeComments        String?
+  actionAdjustments       String?
+  createdAt               DateTime                   @default(now())
+  updatedAt               DateTime                   @updatedAt
+
+  pip                     PerformanceImprovementPlan @relation(fields: [pipId], references: [id], onDelete: Cascade)
+
+  @@index([pipId, checkInMonth])
+}
+
+// =========================================================================
+// PHASE 6: CONFIGURABLE KENYAN PAYROLL & REMUNERATION ARCHITECTURE (R3)
+// =========================================================================
+
+model PayrollPayGroup {
+  id                 String                     @id @default(uuid())
+  code               String                     @unique // PG-EXEC, PG-PROF, PG-OPS, PG-INTERN, etc.
+  name               String
+  payFrequency       String                     @default("MONTHLY") // MONTHLY, BI_WEEKLY, WEEKLY
+  currency           String                     @default("KES")
+  cutoffDay          Int                        @default(20)
+  payDayRule         String                     @default("LAST_BUSINESS_DAY") // LAST_BUSINESS_DAY, FIXED_DAY, LAST_DAY
+  payDayOffset       Int                        @default(0)
+  workingDaysBasis   String                     @default("ACTUAL_WORKING_DAYS") // ACTUAL_WORKING_DAYS, AVERAGE_22_DAYS, AVERAGE_21_75_DAYS, CALENDAR_DAYS
+  prorationMethod    String                     @default("WORKING_DAYS") // WORKING_DAYS, CALENDAR_DAYS
+  defaultRuleSetId   String?
+  isActive           Boolean                    @default(true)
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+
+  assignments        EmployeeSalaryAssignment[]
+  periods            PayrollPeriod[]
+}
+
+model PayrollComponent {
+  id                     String   @id @default(uuid())
+  code                   String   @unique // BASIC, HOUSE_ALLW, COMMUTER_ALLW, RESP_ALLW, BONUS, UNPAID_LEAVE, etc.
+  name                   String
+  category               String   // EARNING, BENEFIT_TAXABLE, BENEFIT_NON_TAXABLE, DEDUCTION_STATUTORY_EE, DEDUCTION_VOLUNTARY_EE, CONTRIBUTION_STATUTORY_ER, CONTRIBUTION_VOLUNTARY_ER
+  calculationType        String   @default("FIXED_AMOUNT") // FIXED_AMOUNT, PERCENTAGE_OF_BASIC, PERCENTAGE_OF_GROSS, DAILY_RATE, HOURLY_RATE, FORMULA, STATUTORY_RULE
+  formulaExpression      String?  // e.g. "BASIC * 0.15" or "{rate} * days"
+  isPensionable          Boolean  @default(true)
+  isTaxable              Boolean  @default(true)
+  isSubjectToHousingLevy Boolean  @default(true)
+  isSubjectToHealthLevy  Boolean  @default(true)
+  isProRataApplicable    Boolean  @default(true)
+  isRecurrent            Boolean  @default(true)
+  displayOrder           Int      @default(10)
+  isActive               Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+}
+
+model EmployeeSalaryAssignment {
+  id               String           @id @default(uuid())
+  employeeId       String
+  payGroupId       String?
+  effectiveDate    DateTime
+  endDate          DateTime?
+  status           String           @default("APPROVED") // DRAFT, PROPOSED, APPROVED, SUPERSEDED
+  currency         String           @default("KES")
+  components       String           // JSON: e.g. {"BASIC": 60000, "HOUSE_ALLW": 15000, "COMMUTER_ALLW": 5000}
+  totalGrossSalary Float            @default(0)
+  changeReason     String?
+  proposedById     String?
+  proposedAt       DateTime?
+  approvedById     String?
+  approvedAt       DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  employee         Employee         @relation(fields: [employeeId], references: [id])
+  payGroup         PayrollPayGroup? @relation(fields: [payGroupId], references: [id])
+
+  @@index([employeeId, status])
+  @@index([effectiveDate])
+}
+
+model StatutoryRuleSet {
+  id               String          @id @default(uuid())
+  code             String          @unique // KENYA_STATUTORY_2026, KENYA_STATUTORY_2024, CUSTOM_SETUP
+  name             String
+  countryCode      String          @default("KE")
+  currency         String          @default("KES")
+  effectiveFrom    DateTime
+  effectiveTo      DateTime?
+  status           String          @default("ACTIVE") // DRAFT, PROPOSED, ACTIVE, SUPERSEDED
+  version          String          @default("1.0")
+  description      String?
+  sourceDocument   String?         // e.g. "Finance Act 2023, NSSF Act 2013 Year 4, SHA Act 2023, Affordable Housing Act 2024"
+  isDefault        Boolean         @default(false)
+  proposedById     String?
+  proposedAt       DateTime?
+  approvedById     String?
+  approvedAt       DateTime?
+  rulesSnapshot    String?         // JSON snapshot of all rules at activation time
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  rules            StatutoryRule[]
+  runs             PayrollRun[]
+}
+
+model StatutoryRule {
+  id                       String           @id @default(uuid())
+  ruleSetId                String
+  code                     String           // PAYE, NSSF, SHIF, AHL, NITA, CUSTOM_LEVY
+  name                     String
+  category                 String           // INCOME_TAX, PENSION, HEALTH_INSURANCE, HOUSING_LEVY, TRAINING_LEVY, OTHER
+  algorithmType            String           // TIERED_BRACKETS, TIERED_PENSION_CAPS, PERCENTAGE_OF_GROSS, FIXED_PER_EMPLOYEE, CUSTOM_FORMULA
+  parameters               String           // JSON: brackets, caps, rates, reliefs, etc.
+  deductibleFromTaxablePay Boolean          @default(false)
+  reliefPercentage         Float?           // e.g. 15.0 for SHIF
+  reliefMaxMonthly         Float?           // e.g. 5000.0
+  isEmployeeDeduction      Boolean          @default(true)
+  isEmployerContribution   Boolean          @default(false)
+  roundingRule             String           @default("ROUND_HALF_UP") // ROUND_HALF_UP, NEAREST_INTEGER, FLOOR, CEIL, TWO_DECIMALS
+  priority                 Int              @default(10) // Calculation order
+  isActive                 Boolean          @default(true)
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+
+  ruleSet                  StatutoryRuleSet @relation(fields: [ruleSetId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleSetId, code])
+  @@index([ruleSetId, priority])
+}
+
+model PayrollPeriod {
+  id                 String          @id @default(uuid())
+  payGroupId         String
+  periodCode         String          // e.g. "2026-11-PROF"
+  periodNumber       Int             // 1..12
+  fiscalYear         Int             // 2026
+  name               String          // "November 2026"
+  startDate          DateTime
+  endDate            DateTime
+  cutoffDate         DateTime
+  payDate            DateTime
+  status             String          @default("DRAFT") // DRAFT, UNDER_REVIEW, APPROVED, LOCKED
+  isAdjustmentPeriod Boolean         @default(false)
+  parentPeriodId     String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  payGroup           PayrollPayGroup @relation(fields: [payGroupId], references: [id])
+  runs               PayrollRun[]
+  slips              PayrollSlip[]
+
+  @@unique([payGroupId, periodCode])
+  @@index([fiscalYear, periodNumber])
+}
+
+model PayrollRun {
+  id                       String                        @id @default(uuid())
+  periodId                 String
+  runNumber                Int                           @default(1)
+  runType                  String                        @default("STANDARD") // STANDARD, ADJUSTMENT, SIMULATION
+  status                   String                        @default("DRAFT") // DRAFT, CALCULATED, UNDER_REVIEW, APPROVED, LOCKED
+  ruleSetId                String
+  ruleSetSnapshot          String                        // JSON frozen copy of exact rules at calculation
+  totalEmployeesCount      Int                           @default(0)
+  totalGrossPay            Float                         @default(0)
+  totalTaxablePay          Float                         @default(0)
+  totalNetPay              Float                         @default(0)
+  totalEmployeeDeductions  Float                         @default(0)
+  totalEmployerCosts       Float                         @default(0)
+  totalPAYE                Float                         @default(0)
+  totalNSSFEmployee        Float                         @default(0)
+  totalNSSFEmployer        Float                         @default(0)
+  totalSHIF                Float                         @default(0)
+  totalHousingLevyEmployee Float                         @default(0)
+  totalHousingLevyEmployer Float                         @default(0)
+  totalNITA                Float                         @default(0)
+  preparerId               String?
+  preparedAt               DateTime?
+  reviewerId               String?
+  reviewedAt               DateTime?
+  approverId               String?
+  approvedAt               DateTime?
+  lockedById               String?
+  lockedAt                 DateTime?
+  isProductionCertified    Boolean                       @default(false) // Exit gate: false until parallel runs pass
+  auditHash                String?                       // SHA-256 tamper-evident hash
+  notes                    String?
+  createdAt                DateTime                      @default(now())
+  updatedAt                DateTime                      @updatedAt
+
+  period                   PayrollPeriod                 @relation(fields: [periodId], references: [id])
+  ruleSet                  StatutoryRuleSet              @relation(fields: [ruleSetId], references: [id])
+  slips                    PayrollSlip[]
+  exports                  BankScheduleExport[]
+  reconciliations          PayrollReconciliationReport[]
+
+  @@index([periodId, status])
+}
+
+model PayrollSlip {
+  id                      String            @id @default(uuid())
+  runId                   String
+  periodId                String
+  employeeId              String
+  employeeName            String
+  employeeRef             String
+  departmentId            String?
+  positionId              String?
+  bankName                String?
+  bankBranch              String?
+  accountNumberMasked     String?
+  kraPinMasked            String?
+  nssfNumberMasked        String?
+  shifNumberMasked        String?
+  daysWorked              Float             @default(0)
+  daysAbsent              Float             @default(0)
+  proRataFactor           Float             @default(1.0)
+  grossPay                Float             @default(0)
+  taxablePay              Float             @default(0)
+  totalEmployeeDeductions Float             @default(0)
+  netPay                  Float             @default(0)
+  totalEmployerCosts      Float             @default(0)
+  paymentStatus           String            @default("PENDING") // PENDING, RELEASED, HELD
+  holdReason              String?
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
+
+  run                     PayrollRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
+  period                  PayrollPeriod     @relation(fields: [periodId], references: [id])
+  employee                Employee          @relation(fields: [employeeId], references: [id])
+  lineItems               PayrollLineItem[]
+
+  @@unique([runId, employeeId])
+  @@index([employeeId, periodId])
+}
+
+model PayrollLineItem {
+  id             String      @id @default(uuid())
+  slipId         String
+  componentCode  String
+  componentName  String
+  category       String      // EARNING, BENEFIT, DEDUCTION_EE, CONTRIBUTION_ER
+  amount         Float
+  isTaxable      Boolean     @default(true)
+  isRelief       Boolean     @default(false)
+  sourceInput    String      // SALARY_ASSIGNMENT, LEAVE_UNPAID, STATUTORY_RULE, MANUAL_ADJUSTMENT
+  formulaApplied String      // Traceable formula used
+  ruleVersion    String?
+  displayOrder   Int         @default(10)
+  createdAt      DateTime    @default(now())
+
+  slip           PayrollSlip @relation(fields: [slipId], references: [id], onDelete: Cascade)
+
+  @@index([slipId, componentCode])
+}
+
+model PayrollReconciliationReport {
+  id                        String     @id @default(uuid())
+  runId                     String
+  comparisonRunId           String?
+  totalGrossVariance        Float      @default(0)
+  totalNetVariance          Float      @default(0)
+  totalDeductionsVariance   Float      @default(0)
+  totalEmployerCostVariance Float      @default(0)
+  varianceDetails           String     // JSON comparison
+  exceptionsCount           Int        @default(0)
+  exceptionsList            String?    // JSON array
+  generatedById             String
+  generatedAt               DateTime   @default(now())
+
+  run                       PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+}
+
+model BankScheduleExport {
+  id                  String     @id @default(uuid())
+  runId               String
+  bankFormatCode      String     @default("STANDARD_EFT_CSV")
+  totalAmount         Float
+  recordCount         Int
+  exportedById        String
+  exportedAt          DateTime   @default(now())
+  fileChecksum        String
+  maskedExportPayload String     // JSON/CSV payload with masked sensitive fields
+  createdAt           DateTime   @default(now())
+
+  run                 PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+}
+
+// =========================================================================
+// PHASE 7: INTEGRATION CONTROL, PRIVACY (DSR/HOLDS) & OBSERVABILITY
+// =========================================================================
+
+model IntegrationConfig {
+  id                      String    @id @default(uuid())
+  provider                String    @unique // M365_IDENTITY, M365_GRAPH, S3_DOCS, SIEM_FORWARDER, LMS_LEARNING, E_SIGNATURE, RECRUITMENT_ATS, BANK_EFT
+  name                    String
+  status                  String    @default("ACTIVE") // ACTIVE, TESTING, DISABLED
+  lawfulPurpose           String
+  systemOwner             String
+  dataExchangedSummary    String
+  dataMinimisationSummary String
+  scopes                  String?   // JSON array or space-delimited OAuth scopes
+  configPayloadEncrypted  String?   // AES-256-GCM encrypted client secrets, credentials, tenant ID
+  webhookSecretEncrypted  String?   // AES-256-GCM encrypted webhook signing key
+  outboundUrl             String?   // SIEM HTTPS forwarder endpoint or Graph base URL
+  retryMaxAttempts        Int       @default(3)
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  webhookLogs             IntegrationWebhookLog[]
+}
+
+model IntegrationWebhookLog {
+  id                  String             @id @default(uuid())
+  integrationConfigId String?
+  provider            String             // LMS_LEARNING, E_SIGNATURE, RECRUITMENT_ATS, M365
+  eventType           String
+  payloadHash         String             // SHA-256 hash for deduplication/replay check
+  status              String             @default("PROCESSED") // PROCESSED, REJECTED, DUPLICATE, FAILED
+  responseCode        Int                @default(200)
+  errorMessage        String?
+  sourceIp            String?
+  createdAt           DateTime           @default(now())
+
+  integration         IntegrationConfig? @relation(fields: [integrationConfigId], references: [id], onDelete: SetNull)
+
+  @@index([provider, payloadHash])
+  @@index([status])
+}
+
+model PrivacyDataSubjectRequest {
+  id                  String    @id @default(uuid())
+  requestNumber       String    @unique // DSR-2026-0001
+  employeeId          String
+  requestType         String    // ACCESS, RECTIFICATION, ERASURE, OBJECTION, PORTABILITY
+  status              String    @default("SUBMITTED") // SUBMITTED, UNDER_REVIEW, APPROVED, REJECTED, FULFILLED
+  lawfulJustification String
+  details             String?
+  rejectionReason     String?
+  requesterEmail      String
+  handlerUserId       String?
+  fulfilledAt         DateTime?
+  exportArtifactPath  String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  employee            Employee  @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId, status])
+  @@index([requestType])
+}
+
+model PrivacyLegalHold {
+  id              String    @id @default(uuid())
+  holdReference   String    @unique // HOLD-2026-0001
+  employeeId      String
+  matterTitle     String
+  reasonCategory  String    // LITIGATION, ER_INVESTIGATION, TAX_AUDIT, REGULATORY
+  status          String    @default("ACTIVE") // ACTIVE, RELEASED
+  effectiveDate   DateTime  @default(now())
+  releaseDate     DateTime?
+  authorizedById  String
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  employee        Employee  @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId, status])
+}
+
+// ============================================================================
+// MODULE: TIME TRACKER, RESOURCE UTILIZATION & PROJECT PROFITABILITY
+// ============================================================================
+
+model TimeClient {
+  id           String        @id @default(uuid())
+  code         String        @unique
+  name         String
+  industry     String        @default("Financial Services")
+  contactName  String?
+  contactEmail String?
+  currency     String        @default("KES")
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  projects     TimeProject[]
+}
+
+model TimeProject {
+  id              String      @id @default(uuid())
+  code            String      @unique
+  name            String
+  clientId        String
+  client          TimeClient  @relation(fields: [clientId], references: [id])
+  department      String      @default("IT & Cybersecurity")
+  leadEmployeeId  String
+  budgetAmountKes Float       @default(0)
+  budgetHours     Float       @default(0)
+  startDate       String
+  endDate         String
+  status          String      @default("ACTIVE") // ACTIVE, ON_HOLD, COMPLETED, ARCHIVED
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  phases          TimePhase[]
+  timeLogs        TimeLog[]
+}
+
+model TimePhase {
+  id          String      @id @default(uuid())
+  projectId   String
+  project     TimeProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name        String
+  startDate   String
+  endDate     String
+  progressPct Int         @default(0)
+  sortOrder   Int         @default(1)
+  timeLogs    TimeLog[]
+}
+
+model TimeRateCard {
+  id             String   @id @default(uuid())
+  employeeId     String   @unique
+  costRateKes    Float    @default(2500) // Burdened internal hourly labor cost
+  billingRateKes Float    @default(6500) // Client-facing advisory billing rate
+  currency       String   @default("KES")
+  effectiveFrom  String   @default("2026-01-01")
+  updatedById    String?
+  updatedAt      DateTime @updatedAt
+}
+
+model TimeLog {
+  id              String      @id @default(uuid())
+  employeeId      String
+  projectId       String
+  project         TimeProject @relation(fields: [projectId], references: [id])
+  phaseId         String?
+  phase           TimePhase?  @relation(fields: [phaseId], references: [id])
+  workDate        String      // YYYY-MM-DD
+  hours           Float       // 0.25 increments
+  isBillable      Boolean     @default(true)
+  description     String
+  costRateSnap    Float       @default(2500)
+  billingRateSnap Float       @default(6500)
+  status          String      @default("PENDING") // PENDING, APPROVED, REJECTED, LOCKED
+  approvedById    String?
+  approvedAt      DateTime?
+  rejectionReason String?
+  periodId        String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([employeeId, workDate])
+  @@index([projectId, status])
+}
+
+model TimePeriodClose {
+  id               String    @id @default(uuid())
+  name             String    @unique // e.g., "September 2026", "October 2026", "November 2026"
+  startDate        String    // YYYY-MM-DD
+  endDate          String    // YYYY-MM-DD
+  status           String    @default("OPEN") // OPEN, LOCKED
+  closedById       String?
+  closedAt         DateTime?
+  snapshotJson     String?   // Immutable JSON Executive Audit Snapshot (KPIs, Margins, Leakage)
+  snapshotChecksum String?   // SHA-256 tamper-proof digest
+  createdAt        DateTime  @default(now())
+}
+
+// ============================================================================
+// MODULE 21: WORKSPACE & ZOHO UX PERSISTENCE (CHECK-INS, FEEDS, DELEGATIONS,
+//            ADDRESS PROOF HR LETTERS & CUSTOM COLUMN VIEWS)
+// ============================================================================
+
+model AttendancePunch {
+  id         String    @id @default(uuid())
+  employeeId String
+  workDate   String    // YYYY-MM-DD
+  clockInAt  DateTime  @default(now())
+  clockOutAt DateTime?
+  totalSecs  Int       @default(0)
+  source     String    @default("WEB")
+  notes      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([employeeId, workDate])
+}
+
+model WorkspaceFeed {
+  id         String   @id @default(uuid())
+  authorId   String
+  authorName String
+  category   String   @default("ANNOUNCEMENT") // ANNOUNCEMENT, STATUS, KUDOS
+  message    String
+  createdAt  DateTime @default(now())
+}
+
+model ApprovalDelegation {
+  id              String   @id @default(uuid())
+  delegatorId     String
+  delegateName    String
+  delegateId      String?
+  startDate       String
+  endDate         String
+  delegationType  String   @default("TEMPORARY")
+  notifyDelegator Boolean  @default(true)
+  isActive        Boolean  @default(true)
+  reason          String?
+  createdAt       DateTime @default(now())
+}
+
+model HrLetterRequest {
+  id              String   @id @default(uuid())
+  employeeId      String
+  letterType      String   @default("ADDRESS_PROOF")
+  reason          String
+  otherReason     String?
+  changeInAddress Boolean  @default(false)
+  addressDetails  String?
+  status          String   @default("SUBMITTED") // DRAFT, SUBMITTED, APPROVED, REJECTED
+  reviewedById    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([employeeId, status])
+}
+
+model CustomDataView {
+  id             String   @id @default(uuid())
+  module         String   // DIRECTORY, ADDRESS_PROOF, TIMETRACKER
+  name           String
+  columnsJson    String
+  viewPermission String   @default("ONLY_ME") // ONLY_ME, EVERYONE, ROLE
+  isDefault      Boolean  @default(false)
+  createdById    String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}

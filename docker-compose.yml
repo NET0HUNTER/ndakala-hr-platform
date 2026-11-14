@@ -1,0 +1,51 @@
+services:
+  hr-db:
+    image: postgres:16-alpine
+    container_name: ndakala_hr-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ndakala_hr}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ndakala_hr_prod_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-ndakala_hr}
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-ndakala_hr} -d $${POSTGRES_DB:-ndakala_hr}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ndakala-hr-net
+
+  hr-platform:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ndakala-hr-platform:latest
+    container_name: ndakala_hr-app
+    restart: unless-stopped
+    depends_on:
+      hr-db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3006:4000"
+    environment:
+      - PORT=4000
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-ndakala_hr}:${POSTGRES_PASSWORD:-ndakala_hr_prod_pass}@ndakala_hr-db:5432/${POSTGRES_DB:-ndakala_hr}?schema=public
+      - ENCRYPTION_MASTER_KEY=${ENCRYPTION_MASTER_KEY:-}
+      - IDENTIFIER_HASH_SECRET=${IDENTIFIER_HASH_SECRET:-}
+      - DOWNLOAD_TOKEN_SECRET=${DOWNLOAD_TOKEN_SECRET:-}
+      - INITIAL_ADMIN_PASSWORD=${INITIAL_ADMIN_PASSWORD:-}
+      - EMPLOYEE_NUMBER_PREFIX=NDA
+      - LIFECYCLE_JOB_INTERVAL_MINUTES=60
+    volumes:
+      # Persist Prisma directory and encrypted document vault across container restarts
+      - ./prisma:/app/prisma
+      - ./secure_storage:/app/secure_storage
+    networks:
+      - ndakala-hr-net
+
+networks:
+  ndakala-hr-net:
+    name: ndakala-hr-net
