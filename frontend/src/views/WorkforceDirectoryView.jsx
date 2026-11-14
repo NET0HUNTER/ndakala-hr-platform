@@ -551,8 +551,14 @@ export default function WorkforceDirectoryView({
     const workEmail = candidateForm.officialEmail || candidateForm.email;
     const rawPhone = `${candidateForm.phoneCode || '+254'}${candidateForm.phone || '712000000'}`.replace(/\s+/g, '');
 
+    const trimmedJobTitle = candidateForm.jobTitle ? candidateForm.jobTitle.trim() : '';
+    const trimmedNationalId = candidateForm.nationalId ? candidateForm.nationalId.trim() : '';
+    const trimmedKraPin = candidateForm.kraPin ? candidateForm.kraPin.trim() : '';
+    const trimmedNssf = candidateForm.nssfNumber ? candidateForm.nssfNumber.trim() : '';
+    const trimmedShif = candidateForm.shifNumber ? candidateForm.shifNumber.trim() : '';
+
     if (onCreateEmployee) {
-      await onCreateEmployee({
+      const createdOk = await onCreateEmployee({
         firstName: candidateForm.firstName.trim(),
         lastName: candidateForm.lastName.trim(),
         personalEmail: candidateForm.email.trim(),
@@ -560,18 +566,19 @@ export default function WorkforceDirectoryView({
         phoneNumber: rawPhone.length >= 8 ? rawPhone : '+254712000000',
         gender: candidateForm.gender || 'Male',
         dateOfBirth: candidateForm.dateOfBirth || undefined,
-        nationalId: candidateForm.nationalId || undefined,
-        kraPin: candidateForm.kraPin || undefined,
-        nssfNumber: candidateForm.nssfNumber || undefined,
-        shifNumber: candidateForm.shifNumber || undefined,
+        nationalId: trimmedNationalId || undefined,
+        kraPin: trimmedKraPin || undefined,
+        nssfNumber: trimmedNssf || undefined,
+        shifNumber: trimmedShif || undefined,
         employmentCategoryCode: candidateForm.employmentCategoryCode || categories.find((c) => c.status === 'ACTIVE')?.code || 'PERMANENT',
         startDate: candidateForm.hireDate || '2026-11-13',
-        jobTitle: candidateForm.jobTitle || 'Associate',
+        jobTitle: trimmedJobTitle.length >= 2 ? trimmedJobTitle : 'Associate',
         departmentId: chosenDeptId,
         ...(candidateForm.positionId ? { positionId: candidateForm.positionId } : {}),
         ...(candidateForm.gradeId ? { gradeId: candidateForm.gradeId } : {}),
         ...(candidateForm.locationId ? { locationId: candidateForm.locationId } : {}),
       });
+      if (createdOk === false) return;
     }
     if (photoPreview?.base64) {
       await apiPost('/api/v1/documents/upload', {

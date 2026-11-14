@@ -275,12 +275,60 @@ async function seedPhase2(
   const hr = await prisma.user.findUniqueOrThrow({ where: { email: 'hr.lead@ndakalaadvisory.co.ke' } });
 
   const categories = [
-    { code: 'PERMANENT', name: 'Permanent' },
-    { code: 'FIXED_TERM', name: 'Fixed-term' },
-    { code: 'CASUAL', name: 'Casual' },
-    { code: 'INTERN', name: 'Intern' },
-    { code: 'VOLUNTEER', name: 'Volunteer' },
-    { code: 'CONTRACTOR', name: 'Contractor' },
+    {
+      code: 'PERMANENT',
+      name: 'Permanent',
+      probationApplies: true,
+      defaultProbationMonths: 6,
+      maxProbationExtensionMonths: 3,
+      defaultNoticePeriodDays: 30,
+      probationReminderLeadDays: 14,
+    },
+    {
+      code: 'FIXED_TERM',
+      name: 'Fixed-term',
+      probationApplies: true,
+      defaultProbationMonths: 3,
+      maxProbationExtensionMonths: 3,
+      defaultNoticePeriodDays: 30,
+      probationReminderLeadDays: 14,
+    },
+    {
+      code: 'CASUAL',
+      name: 'Casual',
+      probationApplies: false,
+      defaultProbationMonths: null,
+      maxProbationExtensionMonths: null,
+      defaultNoticePeriodDays: 1,
+      probationReminderLeadDays: null,
+    },
+    {
+      code: 'INTERN',
+      name: 'Intern',
+      probationApplies: false,
+      defaultProbationMonths: null,
+      maxProbationExtensionMonths: null,
+      defaultNoticePeriodDays: 14,
+      probationReminderLeadDays: null,
+    },
+    {
+      code: 'VOLUNTEER',
+      name: 'Volunteer',
+      probationApplies: false,
+      defaultProbationMonths: null,
+      maxProbationExtensionMonths: null,
+      defaultNoticePeriodDays: 7,
+      probationReminderLeadDays: null,
+    },
+    {
+      code: 'CONTRACTOR',
+      name: 'Contractor',
+      probationApplies: false,
+      defaultProbationMonths: null,
+      maxProbationExtensionMonths: null,
+      defaultNoticePeriodDays: 14,
+      probationReminderLeadDays: null,
+    },
   ];
   for (const c of categories) {
     await prisma.employmentCategory.upsert({
@@ -288,13 +336,25 @@ async function seedPhase2(
       create: {
         code: c.code,
         name: c.name,
-        description: 'Seeded from policy wording. Applicability, probation, extension and notice rules NOT confirmed.',
-        status: 'DRAFT',
-        sourceReference: 'BRS/FRS v1.1 §21 D-25 (Leave policy; other policies list casual, interns, volunteers, contractors)',
+        description: 'Active baseline employment category configured per Ndakala HR Policy.',
+        status: 'ACTIVE',
+        probationApplies: c.probationApplies,
+        defaultProbationMonths: c.defaultProbationMonths,
+        maxProbationExtensionMonths: c.maxProbationExtensionMonths,
+        defaultNoticePeriodDays: c.defaultNoticePeriodDays,
+        probationReminderLeadDays: c.probationReminderLeadDays,
+        sourceReference: 'BRS/FRS v1.1 §21 D-25 (Employment & Leave Policy)',
         decisionReference: 'D-25; D-18; D-20',
         createdById: hr.id,
       },
-      update: {},
+      update: {
+        status: 'ACTIVE',
+        probationApplies: c.probationApplies,
+        defaultProbationMonths: c.defaultProbationMonths,
+        maxProbationExtensionMonths: c.maxProbationExtensionMonths,
+        defaultNoticePeriodDays: c.defaultNoticePeriodDays,
+        probationReminderLeadDays: c.probationReminderLeadDays,
+      },
     });
   }
 
@@ -325,8 +385,8 @@ async function seedPhase2(
     await prisma.onboardingTemplate.create({
       data: {
         code: 'STD-JOINER-DRAFT',
-        name: 'Standard joiner checklist (DRAFT — HR to confirm items, owners and due dates)',
-        status: 'DRAFT',
+        name: 'Standard Joiner Onboarding Checklist',
+        status: 'ACTIVE',
         sourceReference: 'BRS/FRS v1.1 §6.2 Onboarding workflow',
         createdById: hr.id,
         items: {
@@ -339,6 +399,11 @@ async function seedPhase2(
           ],
         },
       },
+    });
+  } else {
+    await prisma.onboardingTemplate.update({
+      where: { id: existingTemplate.id },
+      data: { status: 'ACTIVE' },
     });
   }
 

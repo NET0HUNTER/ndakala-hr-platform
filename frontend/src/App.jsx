@@ -169,6 +169,11 @@ export default function App() {
     setAuthChecking(true);
     try {
       const me = await apiGet('/api/v1/auth/me');
+      if (!me?.user) {
+        setCurrentUser(null);
+        setCsrfToken(null);
+        return;
+      }
       if (me?.csrfToken) setCsrfToken(me.csrfToken);
       const userObj = {
         ...me.user,
@@ -295,8 +300,10 @@ export default function App() {
       await apiPost('/api/v1/employees', payload);
       showToast('Employee profile created.');
       await fetchAllData();
+      return true;
     } catch (err) {
       showToast(err?.message || 'Failed to create employee', 'error');
+      return false;
     }
   };
 

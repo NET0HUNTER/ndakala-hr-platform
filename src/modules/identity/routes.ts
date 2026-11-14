@@ -251,14 +251,23 @@ export function createIdentityRouter(deps: AppDeps): Router {
     },
   });
 
-  // 3. Current User Context
+  // 3. Current User Context (returns HTTP 200 with authenticated: false when logged out to prevent spurious 401 console errors)
   registerRoute(router, deps, {
     method: 'get',
     path: '/auth/me',
-    auth: 'session',
-    handler: async ({ auth, deps }) => {
+    auth: 'public',
+    handler: async ({ req, deps }) => {
+      if (!req.auth) {
+        return {
+          authenticated: false,
+          user: null,
+          roles: [],
+          permissions: [],
+          csrfToken: null,
+        };
+      }
       const user = await deps.prisma.user.findUnique({
-        where: { id: auth.userId },
+        where: { id: req.auth.userId },
         select: {
           id: true,
           email: true,
@@ -270,10 +279,11 @@ export function createIdentityRouter(deps: AppDeps): Router {
         },
       });
       return {
+        authenticated: true,
         user,
-        roles: auth.roles,
-        permissions: Array.from(auth.permissions),
-        csrfToken: auth.csrfToken,
+        roles: req.auth.roles,
+        permissions: Array.from(req.auth.permissions),
+        csrfToken: req.auth.csrfToken,
       };
     },
   });
