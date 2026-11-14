@@ -11,6 +11,34 @@ import {
 import { apiGet, apiPost, apiPut, apiPatch, unwrapList } from '../utils/api';
 import OrgAdminEnterprisePanels from './OrgAdminEnterprisePanels';
 
+const DEPT_STOP_WORDS = new Set(['and', 'of', 'the', 'for', 'in', 'to', 'with']);
+
+function previewDepartmentCode(name, departmentsList = [], editingId = null) {
+  const rawWords = String(name || '')
+    .replace(/&/g, ' ')
+    .replace(/[^a-zA-Z0-9\s]/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (rawWords.length === 0) return '';
+  const significant = rawWords.filter((w) => !DEPT_STOP_WORDS.has(w.toLowerCase()));
+  const words = significant.length > 0 ? significant : rawWords;
+  const base =
+    words.length === 1
+      ? words[0].slice(0, 4).toUpperCase().padEnd(2, 'X')
+      : `${words[0].slice(0, 3).toUpperCase()}-${words[1].slice(0, 3).toUpperCase()}`;
+
+  const taken = new Set(
+    (departmentsList || [])
+      .filter((d) => d && d.id !== editingId && d.code)
+      .map((d) => String(d.code).toUpperCase())
+  );
+  if (!taken.has(base)) return base;
+  let suffix = 2;
+  while (taken.has(`${base.slice(0, 16)}-${suffix}`)) suffix += 1;
+  return `${base.slice(0, 16)}-${suffix}`;
+}
+
 const ENTERPRISE_ADMIN_TABS = [
   { id: 'users', label: 'Users & RBAC' },
   { id: 'policyengine', label: 'Policy Engine (Maker-Checker)' },
@@ -61,10 +89,13 @@ export default function OrgSettingsPanel({
   const [deptFilter, setDeptFilter] = useState('');
   const [deptFilterOpen, setDeptFilterOpen] = useState(false);
   const [deptModalOpen, setDeptModalOpen] = useState(false);
+  const [editingDeptId, setEditingDeptId] = useState(null);
+  const [originalDeptName, setOriginalDeptName] = useState('');
   const [deptForm, setDeptForm] = useState({
     code: '',
     name: '',
     headOfDepartmentId: '',
+    parentDepartmentId: '',
   });
 
   const [desigFilter, setDesigFilter] = useState('');
@@ -126,6 +157,10 @@ export default function OrgSettingsPanel({
             id: d.id,
             name: d.name,
             code: d.code,
+            headOfDepartmentId: d.headOfDepartmentId || '',
+            parentDepartmentId: d.parentDepartmentId || '',
+            parentDepartmentName: d.parentDepartment?.name || '',
+            isActive: d.isActive !== false,
             users: d._count?.employees ?? d.employees?.length ?? 0,
             alias: `${(d.code || 'dept').toLowerCase()}@ndakalaadvisory.co.ke`,
             lead: d.headOfDepartment
@@ -235,18 +270,49 @@ export default function OrgSettingsPanel({
     }
   };
 
-  const handleCreateDepartment = async (e) => {
+  const handleOpenAddDepartment = () => {
+    setEditingDeptId(null);
+    setOriginalDeptName('');
+    setDeptForm({ code: '', name: '', headOfDepartmentId: '', parentDepartmentId: '' });
+    setDeptModalOpen(true);
+  };
+
+  const handleOpenEditDepartment = (dept) => {
+    setEditingDeptId(dept.id);
+    setOriginalDeptName(dept.name || '');
+    setDeptForm({
+      code: dept.code || '',
+      name: dept.name || '',
+      headOfDepartmentId: dept.headOfDepartmentId || '',
+      parentDepartmentId: dept.parentDepartmentId || '',
+    });
+    setDeptModalOpen(true);
+  };
+
+  const handleSaveDepartment = async (e) => {
     e.preventDefault();
     try {
-      await apiPost('/api/v1/departments', {
-        code: deptForm.code,
-        name: deptForm.name,
-        ...(deptForm.headOfDepartmentId ? { headOfDepartmentId: deptForm.headOfDepartmentId } : {}),
-      });
+      if (editingDeptId) {
+        await apiPatch(`/api/v1/departments/${editingDeptId}`, {
+          name: deptForm.name,
+          headOfDepartmentId: deptForm.headOfDepartmentId || null,
+          parentDepartmentId: deptForm.parentDepartmentId || null,
+        });
+        toast('Department updated.');
+      } else {
+        await apiPost('/api/v1/departments', {
+          name: deptForm.name,
+          ...(deptForm.headOfDepartmentId ? { headOfDepartmentId: deptForm.headOfDepartmentId } : {}),
+          ...(deptForm.parentDepartmentId ? { parentDepartmentId: deptForm.parentDepartmentId } : {}),
+        });
+        toast('Department added.');
+      }
       setDeptModalOpen(false);
-      setDeptForm({ code: '', name: '', headOfDepartmentId: '' });
-      toast('Department added.');
+      setEditingDeptId(null);
+      setOriginalDeptName('');
+      setDeptForm({ code: '', name: '', headOfDepartmentId: '', parentDepartmentId: '' });
       loadOrgData();
+      if (onRefreshAll) onRefreshAll();
     } catch (err) {
       toast(err.message, 'error');
     }
@@ -845,7 +911,7 @@ export default function OrgSettingsPanel({
                 )}
                 <button
                   type="button"
-                  onClick={() => setDeptModalOpen(true)}
+                  onClick={handleOpenAddDepartment}
                   className="px-3.5 py-1.5 bg-[#0088ff] text-white font-medium rounded"
                 >
                   Add Department
@@ -874,18 +940,45 @@ export default function OrgSettingsPanel({
                   <th className="py-3 px-5">Associated users</th>
                   <th className="py-3 px-5">Mail Alias</th>
                   <th className="py-3 px-5">Department Lead</th>
+                  <th className="py-3 px-5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredDepartments.map((d) => (
-                  <tr key={d.id || d.code || d.name} className="hover:bg-slate-50">
-                    <td className="py-3.5 px-5 text-slate-800">{d.name}</td>
-                    <td className="py-3.5 px-5 text-slate-500">{d.code}</td>
-                    <td className="py-3.5 px-5 text-[#0088ff] font-medium">{d.users}</td>
-                    <td className="py-3.5 px-5 text-slate-500">{d.alias}</td>
-                    <td className="py-3.5 px-5 text-slate-600">{d.lead}</td>
-                  </tr>
-                ))}
+                {filteredDepartments.map((d) => {
+                  const leadEmp = d.headOfDepartmentId ? employees.find((e) => e.id === d.headOfDepartmentId) : null;
+                  const displayLead = leadEmp
+                    ? leadEmp.fullName || `${leadEmp.firstName || ''} ${leadEmp.lastName || ''}`.trim()
+                    : d.lead;
+                  return (
+                    <tr key={d.id || d.code || d.name} className="hover:bg-slate-50">
+                      <td className="py-3.5 px-5 text-slate-800">
+                        <div className="font-medium">{d.name}</div>
+                        {d.parentDepartmentName && (
+                          <div className="text-[11px] text-slate-400">Under: {d.parentDepartmentName}</div>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-5">
+                        <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-mono text-[11px] font-semibold">
+                          {d.code}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-5 text-[#0088ff] font-medium">{d.users}</td>
+                      <td className="py-3.5 px-5 text-slate-500">{d.alias}</td>
+                      <td className="py-3.5 px-5 text-slate-600">{displayLead}</td>
+                      <td className="py-3.5 px-5 text-right">
+                        {d.id && (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditDepartment(d)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-[#0088ff] bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded transition-colors"
+                          >
+                            <Edit size={12} /> Edit
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1139,23 +1232,81 @@ export default function OrgSettingsPanel({
         </div>
       )}
 
-      {deptModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 text-xs">
-          <form onSubmit={handleCreateDepartment} className="bg-white rounded-md shadow-xl border border-slate-200 max-w-md w-full p-5 space-y-3">
-            <div className="flex justify-between items-center border-b border-slate-100 pb-2">
-              <h4 className="font-semibold text-slate-800">Add Department</h4>
-              <button type="button" onClick={() => setDeptModalOpen(false)}><X size={15} /></button>
-            </div>
-            <input type="text" required placeholder="Department Code (e.g. CYBER)" value={deptForm.code} onChange={(e) => setDeptForm({ ...deptForm, code: e.target.value })} className="w-full px-3 py-2 border border-slate-300 rounded" />
-            <input type="text" required placeholder="Department Name" value={deptForm.name} onChange={(e) => setDeptForm({ ...deptForm, name: e.target.value })} className="w-full px-3 py-2 border border-slate-300 rounded" />
-            <select value={deptForm.headOfDepartmentId} onChange={(e) => setDeptForm({ ...deptForm, headOfDepartmentId: e.target.value })} className="w-full px-3 py-2 border border-slate-300 rounded bg-white">
-              <option value="">Optional Department Lead...</option>
-              {employees.map((em) => <option key={em.id} value={em.id}>{em.firstName} {em.lastName}</option>)}
-            </select>
-            <button type="submit" className="w-full py-2 bg-[#0088ff] text-white rounded font-medium">Save Department</button>
-          </form>
-        </div>
-      )}
+      {deptModalOpen && (() => {
+        const keepExistingCode = editingDeptId && deptForm.name.trim() === originalDeptName.trim();
+        const computedCode = keepExistingCode
+          ? deptForm.code
+          : previewDepartmentCode(deptForm.name, departments, editingDeptId);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 text-xs">
+            <form onSubmit={handleSaveDepartment} className="bg-white rounded-md shadow-xl border border-slate-200 max-w-md w-full p-5 space-y-3">
+              <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                <h4 className="font-semibold text-slate-800">{editingDeptId ? 'Edit Department' : 'Add Department'}</h4>
+                <button type="button" onClick={() => setDeptModalOpen(false)}><X size={15} /></button>
+              </div>
+              <div className="space-y-1">
+                <label className="block text-[11px] font-medium text-slate-700">Department Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Tax Advisory"
+                  value={deptForm.name}
+                  onChange={(e) => setDeptForm({ ...deptForm, name: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:border-[#0088ff]"
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-medium text-slate-700">Department Code</label>
+                  <span className="px-1.5 py-0.5 rounded bg-blue-50 text-[#0088ff] font-semibold text-[10px]">
+                    AUTO-GENERATED
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  readOnly
+                  disabled
+                  value={computedCode || 'System generates from name'}
+                  className="w-full px-3 py-2 border border-slate-200 rounded bg-slate-50 text-slate-600 font-mono"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="block text-[11px] font-medium text-slate-700">Parent Department</label>
+                <select
+                  value={deptForm.parentDepartmentId}
+                  onChange={(e) => setDeptForm({ ...deptForm, parentDepartmentId: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded bg-white"
+                >
+                  <option value="">None (Top-Level Department)</option>
+                  {departments
+                    .filter((d) => d.id && d.id !== editingDeptId)
+                    .map((d) => (
+                      <option key={d.id} value={d.id}>{d.name} ({d.code})</option>
+                    ))}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="block text-[11px] font-medium text-slate-700">Department Lead</label>
+                <select
+                  value={deptForm.headOfDepartmentId}
+                  onChange={(e) => setDeptForm({ ...deptForm, headOfDepartmentId: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded bg-white"
+                >
+                  <option value="">Optional Department Lead...</option>
+                  {employees.map((em) => (
+                    <option key={em.id} value={em.id}>
+                      {em.fullName || `${em.firstName || ''} ${em.lastName || ''}`.trim()}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button type="submit" className="w-full py-2 bg-[#0088ff] hover:bg-[#0073d9] text-white rounded font-medium">
+                {editingDeptId ? 'Save Changes' : 'Save Department'}
+              </button>
+            </form>
+          </div>
+        );
+      })()}
 
       {desigModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 text-xs">
