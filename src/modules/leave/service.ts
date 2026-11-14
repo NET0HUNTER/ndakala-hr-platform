@@ -418,8 +418,10 @@ export async function reviewLeaveRequest(
     throw conflict(`Leave request is '${req.status}'; only PENDING_APPROVAL requests can be reviewed.`);
   }
 
-  // Self-approval prevention: applicant cannot approve their own leave request
-  if (req.employee.userId && req.employee.userId === auth.userId) {
+  // Self-approval prevention: applicant cannot approve their own leave request,
+  // except Managing Partner (top of reporting hierarchy with no superior manager).
+  const isManagingPartner = auth.roles.includes('managing_partner');
+  if (req.employee.userId && req.employee.userId === auth.userId && !isManagingPartner) {
     throw forbidden('Self-approval violation: You cannot approve your own leave request.');
   }
 

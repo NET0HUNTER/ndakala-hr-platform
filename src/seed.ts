@@ -409,6 +409,7 @@ async function seedPhase2(
 
   // Link seeded actors to employee records (system seed; no agreement/category assumed)
   const links = [
+    { email: 'managing.partner@ndakalaadvisory.co.ke', first: 'Managing', last: 'Partner', number: 'SEED-0000', deptId: refs.deptAdv.id, gradeId: refs.gradeManager.id, managerEmail: null as string | null },
     { email: 'hr.lead@ndakalaadvisory.co.ke', first: 'HR', last: 'Lead', number: 'SEED-0001', deptId: refs.deptHR.id, gradeId: refs.gradeManager.id, managerEmail: null as string | null },
     { email: 'line.manager@ndakalaadvisory.co.ke', first: 'Audit', last: 'Manager', number: 'SEED-0002', deptId: refs.deptAudit.id, gradeId: refs.gradeManager.id, managerEmail: null },
     { email: 'employee.one@ndakalaadvisory.co.ke', first: 'Advisory', last: 'Associate', number: 'SEED-0003', deptId: refs.deptAdv.id, gradeId: refs.gradeAssociate.id, managerEmail: 'line.manager@ndakalaadvisory.co.ke' },

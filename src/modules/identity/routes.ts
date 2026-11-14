@@ -16,6 +16,18 @@ import { encrypt, decrypt } from '../../core/crypto/vault.js';
 import { assertNotSelfRoleAssignment } from '../../core/permissions/rbac.js';
 import { writeAudit } from '../../core/audit/audit.js';
 
+async function findLinkedEmployeeId(
+  prisma: AppDeps['prisma'],
+  userId: string,
+  email: string,
+): Promise<string | null> {
+  const emp = await prisma.employee.findFirst({
+    where: { OR: [{ userId }, { workEmail: email }] },
+    select: { id: true },
+  });
+  return emp?.id ?? null;
+}
+
 export function createIdentityRouter(deps: AppDeps): Router {
   const router = Router();
 
@@ -142,6 +154,8 @@ export function createIdentityRouter(deps: AppDeps): Router {
         outcome: 'SUCCESS',
       });
 
+      const employeeId = await findLinkedEmployeeId(deps.prisma, user.id, user.email);
+
       return {
         token,
         csrfToken,
@@ -150,6 +164,7 @@ export function createIdentityRouter(deps: AppDeps): Router {
           email: user.email,
           name: user.name,
           mustChangePassword: user.mustChangePassword,
+          employeeId,
         },
       };
     },
@@ -278,9 +293,12 @@ export function createIdentityRouter(deps: AppDeps): Router {
           positionId: true,
         },
       });
+      const employeeId = user
+        ? await findLinkedEmployeeId(deps.prisma, user.id, user.email)
+        : null;
       return {
         authenticated: true,
-        user,
+        user: user ? { ...user, employeeId } : null,
         roles: req.auth.roles,
         permissions: Array.from(req.auth.permissions),
         csrfToken: req.auth.csrfToken,
