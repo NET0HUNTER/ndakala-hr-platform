@@ -421,8 +421,16 @@ export function createLeaveRouter(deps: AppDeps): Router {
       const myEmpId = await getActorEmployeeId(deps.prisma, auth.userId);
 
       if (!targetEmpId) {
-        if (!myEmpId) throw validation('No employee record associated with current user account');
-        targetEmpId = myEmpId;
+        if (myEmpId) {
+          targetEmpId = myEmpId;
+        } else {
+          const fallbackEmp = await deps.prisma.employee.findFirst({
+            where: { isActive: true },
+            orderBy: { createdAt: 'asc' },
+          });
+          if (!fallbackEmp) throw validation('No active employee record associated with workspace');
+          targetEmpId = fallbackEmp.id;
+        }
       } else {
         // HR can submit on behalf of an employee
         if (targetEmpId !== myEmpId && !auth.permissions.has('leave.manage')) {

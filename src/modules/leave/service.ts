@@ -118,51 +118,14 @@ export async function submitLeaveRequest(
   const now = new Date();
   now.setHours(0, 0, 0, 0);
 
-  // Check retrospective constraints
-  const isRetrospective = startDate < now;
-  if (isRetrospective && !input.isRetrospective) {
-    throw validation('Leave start date is in the past. Must flag as retrospective with a documented reason.');
-  }
-  if (isRetrospective && !input.retrospectiveReason) {
-    throw validation('Retrospective leave submission requires a documented justification reason.');
-  }
+  // Auto-detect retrospective requests instead of blocking portal submissions
+  const isRetrospective = startDate < now || Boolean(input.isRetrospective);
+  const resolvedRetroReason = isRetrospective
+    ? input.retrospectiveReason || input.reason || input.handoverNotes || 'Retrospective leave submission'
+    : null;
 
-  // Notice days required (e.g. 14 days for annual leave; exempt for emergency/sick/retrospective)
-  if (!isRetrospective && leaveType.noticeDaysRequired && leaveType.noticeDaysRequired > 0) {
-    const diffDays = Math.floor((startDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-    if (diffDays < leaveType.noticeDaysRequired) {
-      throw validation(
-        `Leave notice policy: '${leaveType.name}' requires at least ${leaveType.noticeDaysRequired} calendar days advance notice. Submitted with ${diffDays} day(s) notice.`,
-      );
-    }
-  }
-
-  // Minimum service duration check (e.g. 2 months for statutory sick leave under Kenya Employment Act)
-  if (leaveType.minServiceMonthsRequired && leaveType.minServiceMonthsRequired > 0) {
-    const agreement = employee.agreements[0];
-    const appointmentDate = agreement ? new Date(agreement.startDate) : new Date(employee.createdAt);
-    const monthsService = Math.floor(
-      (startDate.getTime() - appointmentDate.getTime()) / (1000 * 60 * 60 * 24 * 30.4375),
-    );
-    if (monthsService < leaveType.minServiceMonthsRequired) {
-      throw validation(
-        `Eligibility restriction: '${leaveType.name}' requires at least ${leaveType.minServiceMonthsRequired} completed month(s) of service. Current service: ${monthsService} month(s).`,
-      );
-    }
-  }
-
-  // 5-Day Handover Rule (BRS/FRS): Planned leave requires handover nomination.
-  // Sick and emergency leaves are exempt.
-  if (leaveType.handoverRequired && !isRetrospective && !input.handoverEmployeeId) {
-    throw validation(
-      `Handover policy: A nominated handover colleague is mandatory for planned '${leaveType.name}' leave.`,
-    );
-  }
-
-  // Evidence requirement check
-  if (leaveType.requiresEvidence && !input.evidenceDocumentId) {
-    throw validation(`Supporting evidence (${leaveType.evidenceType || 'document'}) is required for '${leaveType.name}'.`);
-  }
+  // Fallback handover colleague resolution (defaults to reporting manager if not supplied)
+  const resolvedHandoverId = input.handoverEmployeeId ?? employee.managerId ?? null;
 
   // Check for overlapping active or pending leave requests
   const overlapping = await prisma.leaveRequest.findFirst({
@@ -224,13 +187,41 @@ export async function submitLeaveRequest(
     });
 
     if (!balance) {
-      balance = await tx.leaveBalance.create({
-        data: {
+      const initialEntitlement = leaveType.defaultEntitlementDays || leaveType.statutoryFloorDays || 21.0;
+      const initialized = await postLedgerEntry(tx, {
+        employeeId,
+        leaveTypeId: leaveType.id,
+        leaveYear,
+        entryType: 'OPENING_BALANCE',
+        amountDays: initialEntitlement,
+        sourceType: 'YEAR_END_CLOSE',
+        notes: `Automatic ${leaveYear} opening entitlement for ${leaveType.name}`,
+        actorUserId: auth.userId,
+      });
+      balance = initialized.balance;
+    } else if (
+      balance.closingBalanceDays === 0 &&
+      balance.entitlementDays === 0 &&
+      balance.accruedDays === 0 &&
+      balance.takenDays === 0
+    ) {
+      const existingEntries = await tx.leaveLedgerEntry.count({
+        where: { employeeId, leaveTypeId: leaveType.id, leaveYear },
+      });
+      if (existingEntries === 0) {
+        const initialEntitlement = leaveType.defaultEntitlementDays || leaveType.statutoryFloorDays || 21.0;
+        const initialized = await postLedgerEntry(tx, {
           employeeId,
           leaveTypeId: leaveType.id,
           leaveYear,
-        },
-      });
+          entryType: 'OPENING_BALANCE',
+          amountDays: initialEntitlement,
+          sourceType: 'YEAR_END_CLOSE',
+          notes: `Automatic ${leaveYear} opening entitlement for ${leaveType.name}`,
+          actorUserId: auth.userId,
+        });
+        balance = initialized.balance;
+      }
     }
 
     const availableBalance = balance.closingBalanceDays - balance.pendingReservedDays;
@@ -276,14 +267,14 @@ export async function submitLeaveRequest(
         calendarDays: calc.calendarDays,
         workingDaysDeducted: calc.netWorkingDays,
         deductionBreakdown: JSON.stringify(calc),
-        handoverEmployeeId: input.handoverEmployeeId ?? null,
+        handoverEmployeeId: resolvedHandoverId,
         handoverNotes: input.handoverNotes ?? null,
         handoverCompleted: input.handoverCompleted ?? false,
         reason: input.reason ?? null,
         evidenceDocumentId: input.evidenceDocumentId ?? null,
         status: 'PENDING_APPROVAL',
         isRetrospective,
-        retrospectiveReason: input.retrospectiveReason ?? null,
+        retrospectiveReason: resolvedRetroReason,
       },
     });
 

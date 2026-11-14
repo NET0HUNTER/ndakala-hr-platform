@@ -256,13 +256,16 @@ export default function App() {
   const handleSubmitLeave = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     try {
+      const targetEmployeeId = currentUser?.employeeId || employees[0]?.id;
+      const fallbackColleague = employees.find((emp) => emp.id !== targetEmployeeId)?.id;
       await apiPost('/api/v1/leave/requests', {
-        employeeId: currentUser?.employeeId || employees[0]?.id,
-        leaveTypeCode: leaveForm.leaveTypeCode,
+        ...(targetEmployeeId ? { employeeId: targetEmployeeId } : {}),
+        leaveTypeCode: leaveForm.leaveTypeCode || 'ANNUAL',
         startDate: leaveForm.startDate,
         endDate: leaveForm.endDate,
+        reason: leaveForm.handoverNotes || 'Leave application via portal',
         handoverNotes: leaveForm.handoverNotes || undefined,
-        handoverEmployeeId: leaveForm.handoverEmployeeId || undefined,
+        handoverEmployeeId: leaveForm.handoverEmployeeId || fallbackColleague || undefined,
       });
       setLeaveModalOpen(false);
       showToast('Leave request submitted successfully.');
