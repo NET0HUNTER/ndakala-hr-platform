@@ -415,6 +415,7 @@ export function createLeaveRouter(deps: AppDeps): Router {
       evidenceDocumentId: z.string().uuid().optional(),
       isRetrospective: z.boolean().default(false),
       retrospectiveReason: z.string().max(500).optional(),
+      replaceOverlapping: z.boolean().optional(),
     }),
     handler: async ({ body, auth, req, deps }) => {
       let targetEmpId = body.employeeId;

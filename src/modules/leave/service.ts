@@ -19,6 +19,7 @@ export interface SubmitLeaveRequestInput {
   evidenceDocumentId?: string | null;
   isRetrospective?: boolean;
   retrospectiveReason?: string | null;
+  replaceOverlapping?: boolean;
 }
 
 export interface ReviewLeaveInput {
@@ -128,7 +129,7 @@ export async function submitLeaveRequest(
   const resolvedHandoverId = input.handoverEmployeeId ?? employee.managerId ?? null;
 
   // Check for overlapping active or pending leave requests
-  const overlapping = await prisma.leaveRequest.findFirst({
+  const overlappingRequests = await prisma.leaveRequest.findMany({
     where: {
       employeeId,
       status: { in: ['PENDING_APPROVAL', 'APPROVED'] },
@@ -137,8 +138,13 @@ export async function submitLeaveRequest(
         { endDate: { gte: startDate } },
       ],
     },
+    include: {
+      reservations: { where: { status: { in: ['ACTIVE', 'COMMITTED_TO_LEDGER'] } } },
+    },
+    orderBy: { createdAt: 'asc' },
   });
-  if (overlapping) {
+  if (overlappingRequests.length > 0 && !input.replaceOverlapping) {
+    const overlapping = overlappingRequests[0];
     throw conflict(
       `Leave request overlaps an existing ${overlapping.status} leave request (${overlapping.requestNumber}: ${overlapping.startDate
         .toISOString()
@@ -176,6 +182,76 @@ export async function submitLeaveRequest(
 
   // Atomically verify balance and create reservation
   return prisma.$transaction(async (tx) => {
+    if (input.replaceOverlapping && overlappingRequests.length > 0) {
+      for (const overlapReq of overlappingRequests) {
+        const overlapYear = overlapReq.startDate.getFullYear();
+        if (overlapReq.status === 'PENDING_APPROVAL') {
+          for (const resv of overlapReq.reservations) {
+            if (resv.status === 'ACTIVE') {
+              await tx.leaveReservation.update({
+                where: { id: resv.id },
+                data: { status: 'RELEASED' },
+              });
+              const balRow = await tx.leaveBalance.findUnique({
+                where: {
+                  employeeId_leaveTypeId_leaveYear: {
+                    employeeId: overlapReq.employeeId,
+                    leaveTypeId: overlapReq.leaveTypeId,
+                    leaveYear: resv.leaveYear ?? overlapYear,
+                  },
+                },
+              });
+              if (balRow && resv.reservedDays > 0) {
+                await tx.leaveBalance.update({
+                  where: { id: balRow.id },
+                  data: {
+                    pendingReservedDays: Math.max(0, balRow.pendingReservedDays - resv.reservedDays),
+                  },
+                });
+              }
+            }
+          }
+          await tx.leaveRequest.update({
+            where: { id: overlapReq.id },
+            data: {
+              status: 'WITHDRAWN',
+              cancellationReason: 'Superseded by updated leave application',
+            },
+          });
+        } else if (overlapReq.status === 'APPROVED') {
+          await postLedgerEntry(tx, {
+            employeeId: overlapReq.employeeId,
+            leaveTypeId: overlapReq.leaveTypeId,
+            leaveYear: overlapYear,
+            entryType: 'REVERSAL',
+            amountDays: overlapReq.workingDaysDeducted,
+            sourceType: 'LEAVE_REQUEST',
+            sourceId: overlapReq.id,
+            notes: `Superseded request ${overlapReq.requestNumber} by updated leave application`,
+            actorUserId: auth.userId,
+          });
+          if (overlapReq.reservations.length > 0) {
+            await tx.leaveReservation.updateMany({
+              where: {
+                leaveRequestId: overlapReq.id,
+                status: { in: ['ACTIVE', 'COMMITTED_TO_LEDGER'] },
+              },
+              data: { status: 'RELEASED' },
+            });
+          }
+          await tx.leaveRequest.update({
+            where: { id: overlapReq.id },
+            data: {
+              status: 'CANCELLED',
+              cancelledAt: new Date(),
+              cancelledById: auth.userId,
+              cancellationReason: 'Superseded by updated leave application',
+            },
+          });
+        }
+      }
+    }
+
     let balance = await tx.leaveBalance.findUnique({
       where: {
         employeeId_leaveTypeId_leaveYear: {

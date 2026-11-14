@@ -12,6 +12,45 @@ const DEFAULT_LEAVE_TYPES = [
   { code: 'UNPAID', name: 'Unpaid Leave', defaultEntitlement: 30 },
 ];
 
+export function findOverlappingLeaveRequests(existingRequests = [], targetEmpId, startDateStr, endDateStr) {
+  if (!startDateStr || !endDateStr) return [];
+  const start = String(startDateStr).slice(0, 10);
+  const end = String(endDateStr).slice(0, 10);
+  if (end < start) return [];
+  return existingRequests.filter((r) => {
+    if (!r || (r.status !== 'PENDING_APPROVAL' && r.status !== 'APPROVED')) return false;
+    if (targetEmpId && r.employeeId && r.employeeId !== targetEmpId) return false;
+    const rStart = String(r.startDate || '').slice(0, 10);
+    const rEnd = String(r.endDate || '').slice(0, 10);
+    if (!rStart || !rEnd) return false;
+    return rStart <= end && rEnd >= start;
+  });
+}
+
+function addUtcDays(isoDate, days) {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return dt.toISOString().slice(0, 10);
+}
+
+export function getNextAvailableLeaveWindow(existingRequests = [], targetEmpId, baseStartStr = '2026-11-16') {
+  const safeBase = /^\d{4}-\d{2}-\d{2}$/.test(String(baseStartStr || ''))
+    ? String(baseStartStr).slice(0, 10)
+    : '2026-11-16';
+  for (let offset = 0; offset < 365; offset += 1) {
+    const startCandidate = addUtcDays(safeBase, offset);
+    const [y, m, d] = startCandidate.split('-').map(Number);
+    const dayOfWeek = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+    // Pick a Monday-Wednesday, Tuesday-Thursday, or Wednesday-Friday 3-weekday window
+    if (dayOfWeek < 1 || dayOfWeek > 3) continue;
+    const endCandidate = addUtcDays(startCandidate, 2);
+    if (findOverlappingLeaveRequests(existingRequests, targetEmpId, startCandidate, endCandidate).length === 0) {
+      return { startDate: startCandidate, endDate: endCandidate };
+    }
+  }
+  return { startDate: safeBase, endDate: addUtcDays(safeBase, 2) };
+}
+
 export default function LeaveRequestModal({
   isOpen,
   onClose,
@@ -19,8 +58,10 @@ export default function LeaveRequestModal({
   setLeaveForm,
   onSubmit,
   leaveBalances = [],
+  leaveRequests = [],
   employees = [],
   currentEmployeeId,
+  targetEmployeeId,
 }) {
   const [calcPreview, setCalcPreview] = useState(null);
   const [teamEmail, setTeamEmail] = useState('');
@@ -81,6 +122,17 @@ export default function LeaveRequestModal({
   const requiresHandover = chargeableDays >= 5;
 
   const colleagues = employees.filter((e) => e.id !== currentEmployeeId);
+  const resolvedEmpId = targetEmployeeId || currentEmployeeId || employees[0]?.id;
+  const overlappingExisting = findOverlappingLeaveRequests(
+    leaveRequests,
+    resolvedEmpId,
+    leaveForm.startDate,
+    leaveForm.endDate
+  );
+  const nextAvailableWindow =
+    overlappingExisting.length > 0
+      ? getNextAvailableLeaveWindow(leaveRequests, resolvedEmpId, leaveForm.startDate)
+      : null;
 
   return (
     <div
@@ -182,6 +234,34 @@ export default function LeaveRequestModal({
                             (calcPreview.publicHolidaysExcluded ?? calcPreview.holidaysExcluded ?? 0)}
                           )
                         </span>
+                      </div>
+                    )}
+
+                    {overlappingExisting.length > 0 && (
+                      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded text-[11px] text-amber-900">
+                        <div className="flex items-start gap-2">
+                          <Info size={14} className="text-amber-600 shrink-0 mt-0.5" />
+                          <span>
+                            Overlaps existing request{' '}
+                            <strong>{overlappingExisting[0].requestNumber}</strong> (
+                            {overlappingExisting[0].status.replace(/_/g, ' ')}). Submitting will replace the overlapping request, or you can use the next open dates.
+                          </span>
+                        </div>
+                        {nextAvailableWindow && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setLeaveForm({
+                                ...leaveForm,
+                                startDate: nextAvailableWindow.startDate,
+                                endDate: nextAvailableWindow.endDate,
+                              })
+                            }
+                            className="px-2.5 py-1 bg-white hover:bg-amber-100 border border-amber-300 rounded text-[11px] font-medium text-amber-900 transition-colors"
+                          >
+                            Use {nextAvailableWindow.startDate} to {nextAvailableWindow.endDate}
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>

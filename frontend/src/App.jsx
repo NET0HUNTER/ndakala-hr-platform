@@ -11,7 +11,10 @@ import PerformanceView from './views/PerformanceView';
 import GovernanceView from './views/GovernanceView';
 import IntegrationsSecurityView from './views/IntegrationsSecurityView';
 import ReportsView from './views/ReportsView';
-import LeaveRequestModal from './views/modals/LeaveRequestModal';
+import LeaveRequestModal, {
+  findOverlappingLeaveRequests,
+  getNextAvailableLeaveWindow,
+} from './views/modals/LeaveRequestModal';
 import UnexpectedAbsenceModal from './views/modals/UnexpectedAbsenceModal';
 import WhistleblowerModal from './views/modals/WhistleblowerModal';
 import PayslipModal from './views/modals/PayslipModal';
@@ -253,6 +256,29 @@ export default function App() {
     showToast('Signed out cleanly.');
   };
 
+  const handleOpenLeaveModal = () => {
+    const targetEmployeeId = currentUser?.employeeId || employees[0]?.id;
+    const overlaps = findOverlappingLeaveRequests(
+      leaveRequests,
+      targetEmployeeId,
+      leaveForm.startDate,
+      leaveForm.endDate
+    );
+    if (overlaps.length > 0) {
+      const nextWindow = getNextAvailableLeaveWindow(
+        leaveRequests,
+        targetEmployeeId,
+        leaveForm.startDate
+      );
+      setLeaveForm((prev) => ({
+        ...prev,
+        startDate: nextWindow.startDate,
+        endDate: nextWindow.endDate,
+      }));
+    }
+    setLeaveModalOpen(true);
+  };
+
   const handleSubmitLeave = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     try {
@@ -266,9 +292,29 @@ export default function App() {
         reason: leaveForm.handoverNotes || 'Leave application via portal',
         handoverNotes: leaveForm.handoverNotes || undefined,
         handoverEmployeeId: leaveForm.handoverEmployeeId || fallbackColleague || undefined,
+        replaceOverlapping: true,
       });
       setLeaveModalOpen(false);
       showToast('Leave request submitted successfully.');
+      const nextWindow = getNextAvailableLeaveWindow(
+        [
+          ...leaveRequests,
+          {
+            employeeId: targetEmployeeId,
+            status: 'PENDING_APPROVAL',
+            startDate: leaveForm.startDate,
+            endDate: leaveForm.endDate,
+          },
+        ],
+        targetEmployeeId,
+        leaveForm.startDate
+      );
+      setLeaveForm((prev) => ({
+        ...prev,
+        startDate: nextWindow.startDate,
+        endDate: nextWindow.endDate,
+        handoverNotes: '',
+      }));
       await fetchAllData();
     } catch (err) {
       showToast(err?.message || 'Failed to submit leave request', 'error');
@@ -517,7 +563,7 @@ export default function App() {
           onMarkNotificationRead={handleMarkNotificationRead}
           onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
           onRetryNotification={handleRetryNotification}
-          onOpenLeaveModal={() => setLeaveModalOpen(true)}
+          onOpenLeaveModal={handleOpenLeaveModal}
           onOpenAbsenceModal={() => setAbsenceModalOpen(true)}
           onOpenMfaModal={handleOpenMfaSetup}
           currentUser={currentUser}
@@ -541,7 +587,7 @@ export default function App() {
               trainings={trainings}
               holidays={holidays}
               tasks={tasks}
-              onOpenLeaveModal={() => setLeaveModalOpen(true)}
+              onOpenLeaveModal={handleOpenLeaveModal}
               onOpenAbsenceModal={() => setAbsenceModalOpen(true)}
               onOpenPayslipModal={(ps) => {
                 setSelectedPayslip(ps);
@@ -585,7 +631,7 @@ export default function App() {
               absences={absences}
               tasks={tasks}
               employees={employees}
-              onOpenLeaveModal={() => setLeaveModalOpen(true)}
+              onOpenLeaveModal={handleOpenLeaveModal}
               onOpenAbsenceModal={() => setAbsenceModalOpen(true)}
               onApproveLeave={(id) => handleReviewLeave(id, 'APPROVE')}
               onRejectLeave={(id) => handleReviewLeave(id, 'REJECT')}
@@ -693,8 +739,10 @@ export default function App() {
         setLeaveForm={setLeaveForm}
         onSubmit={handleSubmitLeave}
         leaveBalances={leaveBalances}
+        leaveRequests={leaveRequests}
         employees={employees}
         currentEmployeeId={currentUser?.employeeId}
+        targetEmployeeId={currentUser?.employeeId || employees[0]?.id}
       />
 
       <UnexpectedAbsenceModal
