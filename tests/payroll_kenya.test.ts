@@ -640,4 +640,104 @@ describe('Kenyan Payroll & Remuneration Engine (Phase 6 - R3 Pilot)', () => {
       expect(nssfItem).toBeDefined();
     });
   });
+
+  // =========================================================================
+  // 8. BANK CSV PAYLOAD, STATUTORY RULESET MAKER-CHECKER & RBAC GUARDS
+  // =========================================================================
+  describe('Bank CSV Export, StatutoryRuleSet Maker-Checker & RBAC Guards', () => {
+    it('includes RFC-4180 csvContent and fileName in bank schedule export with masked accounts', async () => {
+      const lockedRun = await prisma.payrollRun.findFirstOrThrow({
+        where: { status: 'LOCKED' },
+      });
+
+      const exportRes = await partnerClient.agent
+        .post(`/api/v1/payroll/runs/${lockedRun.id}/export-bank`)
+        .set('x-csrf-token', partnerClient.csrfToken)
+        .send({ bankFormatCode: 'STANDARD_EFT_CSV' });
+
+      expect(exportRes.status).toBe(200);
+      expect(typeof exportRes.body.data.csvContent).toBe('string');
+      expect(exportRes.body.data.csvContent).toContain('RecordID,EmployeeName,EmployeeRef,BankName');
+      expect(exportRes.body.data.csvContent).toContain('****');
+      expect(exportRes.body.data.fileName).toContain('.csv');
+    });
+
+    it('blocks employee role from viewing org payroll runs or another employee salary/payslip (403)', async () => {
+      const runsRes = await employeeClient.agent.get('/api/v1/payroll/runs');
+      expect(runsRes.status).toBe(403);
+
+      const partnerEmp = await prisma.employee.findFirstOrThrow({
+        where: { workEmail: { contains: 'managing.partner' } },
+      });
+      const salRes = await employeeClient.agent.get(`/api/v1/payroll/salaries/employee/${partnerEmp.id}`);
+      expect(salRes.status).toBe(403);
+
+      const partnerSlip = await prisma.payrollSlip.findFirst({
+        where: { employeeId: partnerEmp.id },
+      });
+      if (partnerSlip) {
+        const slipRes = await employeeClient.agent.get(`/api/v1/payroll/slips/${partnerSlip.id}`);
+        expect(slipRes.status).toBe(403);
+      }
+    });
+
+    it('enforces Maker-Checker on StatutoryRuleSet proposal & activation and increments adjustment runNumber', async () => {
+      const lockedRun = await prisma.payrollRun.findFirstOrThrow({
+        where: { status: 'LOCKED' },
+      });
+      const secondAdj = await opsClient.agent
+        .post(`/api/v1/payroll/runs/${lockedRun.id}/adjust`)
+        .set('x-csrf-token', opsClient.csrfToken)
+        .send({ notes: 'Second adjustment on same locked parent run' });
+      expect(secondAdj.status).toBe(201);
+      expect(secondAdj.body.data.runNumber).toBeGreaterThan(2);
+
+      const rsCode = `KE_DRAFT_${Date.now()}`;
+      const createRsRes = await hrClient.agent
+        .post('/api/v1/payroll/rule-sets')
+        .set('x-csrf-token', hrClient.csrfToken)
+        .send({
+          code: rsCode,
+          name: 'Kenya 2026 Draft Verification Rule Set',
+          countryCode: 'KE',
+          effectiveFrom: '2026-12-01',
+          rules: [
+            {
+              code: 'PAYE',
+              name: 'PAYE Test',
+              category: 'INCOME_TAX',
+              algorithmType: 'TIERED_BRACKETS',
+              parameters: {
+                bands: [{ order: 1, from: 0, to: null, rate: 0.1 }],
+                personalReliefMonthly: 2400,
+              },
+              isEmployeeDeduction: true,
+              isEmployerContribution: false,
+            },
+          ],
+        });
+      expect(createRsRes.status).toBe(201);
+      const draftId = createRsRes.body.data.id;
+
+      // Self-activation by hrClient must fail Maker-Checker (400)
+      const selfActivate = await hrClient.agent
+        .post(`/api/v1/payroll/rule-sets/${draftId}/activate`)
+        .set('x-csrf-token', hrClient.csrfToken);
+      expect(selfActivate.status).toBe(400);
+      expect(selfActivate.body.error.message.toLowerCase()).toContain('maker-checker');
+
+      // Distinct partner activates draft rule set (200)
+      const partnerActivate = await partnerClient.agent
+        .post(`/api/v1/payroll/rule-sets/${draftId}/activate`)
+        .set('x-csrf-token', partnerClient.csrfToken);
+      expect(partnerActivate.status).toBe(200);
+      expect(partnerActivate.body.data.status).toBe('ACTIVE');
+
+      // Restore KENYA_STATUTORY_2026 as ACTIVE for clean seeded baseline
+      const origRs = await prisma.statutoryRuleSet.findUniqueOrThrow({ where: { code: 'KENYA_STATUTORY_2026' } });
+      await partnerClient.agent
+        .post(`/api/v1/payroll/rule-sets/${origRs.id}/activate`)
+        .set('x-csrf-token', partnerClient.csrfToken);
+    });
+  });
 });

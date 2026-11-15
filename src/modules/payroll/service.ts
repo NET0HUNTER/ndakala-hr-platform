@@ -925,10 +925,14 @@ export class PayrollService {
       throw validation('Adjustments can only be initiated against a LOCKED payroll run.');
     }
 
+    const existingRunsCount = await this.prisma.payrollRun.count({
+      where: { periodId: parentRun.periodId },
+    });
+
     const adjustmentRun = await this.prisma.payrollRun.create({
       data: {
         periodId: parentRun.periodId,
-        runNumber: parentRun.runNumber + 1,
+        runNumber: existingRunsCount + 1,
         runType: 'ADJUSTMENT',
         status: 'DRAFT',
         ruleSetId: parentRun.ruleSetId,
@@ -1050,11 +1054,48 @@ export class PayrollService {
       });
     }
 
+    const csvHeader = [
+      'RecordID',
+      'EmployeeName',
+      'EmployeeRef',
+      'BankName',
+      'BankBranch',
+      'AccountNumberMasked',
+      'NetAmountKES',
+      'Currency',
+      'PaymentReference',
+    ];
+    const escapeCsv = (val: unknown) => {
+      const s = String(val ?? '');
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const csvContent = [
+      csvHeader.join(','),
+      ...rows.map((r) =>
+        [
+          r.recordId,
+          r.employeeName,
+          r.employeeRef,
+          r.bankName,
+          r.bankBranch,
+          r.accountNumberMasked,
+          r.netAmountKES.toFixed(2),
+          r.currency,
+          r.paymentReference,
+        ]
+          .map(escapeCsv)
+          .join(',')
+      ),
+    ].join('\n');
+    const fileName = `eft-${run.period.periodCode}-run${run.runNumber}.csv`;
+
     return {
       exportRecord,
       scheduleRows: rows,
       totalAmount,
       recordCount: rows.length,
+      csvContent,
+      fileName,
       notice:
         'Bank transfer schedule exported. Manual upload to corporate banking portal required; direct automated API disbursement is disabled by security policy.',
     };
@@ -1159,6 +1200,16 @@ export class PayrollService {
         generatedById: actorId,
       },
     });
+
+    if (auditCtx) {
+      await writeAudit(this.prisma, auditCtx, {
+        action: 'PAYROLL_RECONCILIATION_GENERATED',
+        targetType: 'PayrollReconciliationReport',
+        targetId: report.id,
+        outcome: 'SUCCESS',
+        after: { runId, exceptionsCount: exceptionsList.length },
+      });
+    }
 
     return {
       report,

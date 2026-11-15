@@ -42,11 +42,21 @@ export default function PayrollView({
       String(r).toLowerCase()
     )
   );
+  const canPreparePayroll = userPermissions.has('payroll.prepare');
+  const canReviewPayroll = userPermissions.has('payroll.review');
+  const canApprovePayroll = userPermissions.has('payroll.approve');
+  const canLockPayroll = userPermissions.has('payroll.lock');
+  const canExportPayroll = userPermissions.has('payroll.export');
+  const canAdjustPayroll = userPermissions.has('payroll.adjust');
+  const canViewPayrollReports = userPermissions.has('payroll.reports.view');
+  const canManagePayrollConfig = userPermissions.has('payroll.config.manage');
   const canManagePayroll =
-    userPermissions.has('payroll.config.manage') ||
-    userPermissions.has('payroll.prepare') ||
-    userPermissions.has('payroll.approve') ||
-    userPermissions.has('payroll.reports.view') ||
+    canPreparePayroll ||
+    canReviewPayroll ||
+    canApprovePayroll ||
+    canLockPayroll ||
+    canViewPayrollReports ||
+    canManagePayrollConfig ||
     userRoles.has('managing_partner') ||
     userRoles.has('head_of_hr') ||
     userRoles.has('operations_director') ||
@@ -87,6 +97,17 @@ export default function PayrollView({
   const [components, setComponents] = useState([]);
   const [ruleSets, setRuleSets] = useState([]);
   const [selectedRunId, setSelectedRunId] = useState('');
+  const [selectedPeriodId, setSelectedPeriodId] = useState('');
+  const [runSlipsPanel, setRunSlipsPanel] = useState(null);
+  const [bankExportSummary, setBankExportSummary] = useState(null);
+  const [employeeSalaryPreview, setEmployeeSalaryPreview] = useState(null);
+  const [showDraftRuleSetForm, setShowDraftRuleSetForm] = useState(false);
+  const [draftRuleSetForm, setDraftRuleSetForm] = useState({
+    code: 'KENYA_STATUTORY_2026_V2',
+    name: 'Kenya Statutory Framework 2026 (Draft Revision)',
+    effectiveFrom: '2026-12-01',
+    personalReliefMonthly: 2400,
+  });
   const [reconData, setReconData] = useState(null);
   const [calcGross, setCalcGross] = useState(185000);
   const [simResult, setSimResult] = useState(null);
@@ -99,6 +120,8 @@ export default function PayrollView({
     payGroupId: '',
     effectiveDate: '2026-11-01',
     basicSalaryKes: 120000,
+    houseAllwKes: 0,
+    commuterAllwKes: 0,
     changeReason: 'Initial Salary',
   });
   const [periodForm, setPeriodForm] = useState({
@@ -153,7 +176,10 @@ export default function PayrollView({
     if (!selectedRunId && payrollRuns.length > 0) {
       setSelectedRunId(payrollRuns[0].id);
     }
-  }, [employees, salaryStructures, payrollRuns]);
+    if (!selectedPeriodId && payPeriods.length > 0) {
+      setSelectedPeriodId(payPeriods[0].id);
+    }
+  }, [employees, salaryStructures, payrollRuns, payPeriods]);
 
   const persistWizardConfig = async (overrides = {}) => {
     const payload = {
@@ -194,8 +220,8 @@ export default function PayrollView({
     'UGX Uganda Shilling',
   ].filter((c) => c.toLowerCase().includes(currencySearch.toLowerCase()));
 
-  // Show 3-Step Compensation Wizard if wizardStep < 4 and topContextTab === 'compensation' (Payroll/Admin only)
-  if (canManagePayroll && topContextTab === 'compensation' && wizardStep < 4) {
+  // Show 3-Step Compensation Wizard if wizardStep < 4 and topContextTab === 'compensation' (Payroll Config Admin only)
+  if (canManagePayrollConfig && topContextTab === 'compensation' && wizardStep < 4) {
     return (
       <div className="flex-1 bg-[#edf1f7] p-6 overflow-y-auto flex items-center justify-center">
         <div className="bg-white rounded-xl border border-slate-200 shadow-xs max-w-5xl w-full grid grid-cols-1 lg:grid-cols-12 overflow-hidden min-h-[480px]">
@@ -594,13 +620,43 @@ export default function PayrollView({
     ? 'payrollruns'
     : compTab;
 
-  // Compute Kenyan statutory deductions for calculator
-  const nssf = Math.min(calcGross * 0.06, 4320);
-  const shif = Math.max(calcGross * 0.0275, 300);
-  const ahl = calcGross * 0.015;
-  const taxable = Math.max(0, calcGross - nssf);
-  const paye = Math.max(0, taxable * 0.25 - 2400);
-  const netPay = calcGross - nssf - shif - ahl - paye;
+  // Compute Kenyan statutory deductions for 2026 calculator preview (matches KENYA_STATUTORY_2026 rules)
+  const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
+  const nssf = calcGross > 0 ? round2(Math.min(calcGross * 0.06, 6480)) : 0;
+  const shif = calcGross > 0 ? round2(Math.max(calcGross * 0.0275, 300)) : 0;
+  const ahl = calcGross > 0 ? round2(calcGross * 0.015) : 0;
+  const taxable = Math.max(0, round2(calcGross - nssf - ahl));
+  const computePaye2026 = (taxInc, shifAmt) => {
+    if (taxInc <= 0) return 0;
+    const bands = [
+      [0, 24000, 0.1],
+      [24000, 32333.33, 0.25],
+      [32333.33, 500000, 0.3],
+      [500000, 800000, 0.325],
+      [800000, Infinity, 0.35],
+    ];
+    let grossTax = 0;
+    for (const [from, to, rate] of bands) {
+      if (taxInc > from) grossTax += (Math.min(taxInc, to) - from) * rate;
+    }
+    const insRelief = Math.min(shifAmt * 0.15, 5000);
+    return Math.max(0, round2(grossTax - 2400 - insRelief));
+  };
+  const paye = computePaye2026(taxable, shif);
+  const netPay = Math.max(0, round2(calcGross - nssf - shif - ahl - paye));
+
+  const getSlipItemAmount = (slip, codePrefix) => {
+    const items = Array.isArray(slip?.lineItems) ? slip.lineItems : [];
+    const match = items.find((li) => li.componentCode === codePrefix || li.componentCode?.startsWith(codePrefix));
+    return match ? Number(match.amount || 0) : null;
+  };
+  const getSlipDeductionSummary = (slip) => {
+    const payeAmt = getSlipItemAmount(slip, 'PAYE') ?? Number(slip.payeTax || 0);
+    const nssfAmt = getSlipItemAmount(slip, 'NSSF_EE') ?? Number(slip.nssfDeduction || 0);
+    const shifAmt = getSlipItemAmount(slip, 'SHIF_EE') ?? Number(slip.shifDeduction || 0);
+    const ahlAmt = getSlipItemAmount(slip, 'AHL_EE') ?? Number(slip.housingLevy || 0);
+    return { payeAmt, statutoryOther: round2(nssfAmt + shifAmt + ahlAmt) };
+  };
 
   return (
     <div className="flex flex-1 h-full bg-[#edf1f7] overflow-hidden">
@@ -967,36 +1023,41 @@ export default function PayrollView({
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <select
-                      value={periodForm.payGroupId}
-                      onChange={(e) => setPeriodForm({ ...periodForm, payGroupId: e.target.value })}
+                      aria-label="Select Payroll Period"
+                      value={selectedPeriodId || payPeriods[0]?.id || ''}
+                      onChange={(e) => setSelectedPeriodId(e.target.value)}
                       className="px-2.5 py-1.5 border border-slate-300 rounded bg-white"
                     >
-                      {salaryStructures.map((pg) => (
-                        <option key={pg.id} value={pg.id}>{pg.name}</option>
+                      {payPeriods.map((pp) => (
+                        <option key={pp.id} value={pp.id}>
+                          {pp.name} ({pp.periodCode}) — {pp.status}
+                        </option>
                       ))}
                     </select>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const targetPeriod = payPeriods[0];
-                        if (!targetPeriod) {
-                          onShowToast && onShowToast('Create a pay period below first.', 'error');
-                          return;
-                        }
-                        try {
-                          await apiPost(`/api/v1/payroll/periods/${targetPeriod.id}/runs`, {
-                            ruleSetId: ruleSets.find((r) => r.status === 'ACTIVE')?.id,
-                          });
-                          onShowToast && onShowToast(`Payroll run initiated for ${targetPeriod.name}.`);
-                          onRefreshAll && (await onRefreshAll());
-                        } catch (err) {
-                          onShowToast && onShowToast(err?.message || 'Unable to initiate run', 'error');
-                        }
-                      }}
-                      className="px-3.5 py-1.5 bg-[#0088ff] text-white rounded font-medium"
-                    >
-                      + Initiate Payroll Run
-                    </button>
+                    {canPreparePayroll && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const targetPeriod = payPeriods.find((p) => p.id === selectedPeriodId) || payPeriods[0];
+                          if (!targetPeriod) {
+                            onShowToast && onShowToast('Create a pay period in Salary & Pay Groups Setup first.', 'error');
+                            return;
+                          }
+                          try {
+                            await apiPost(`/api/v1/payroll/periods/${targetPeriod.id}/runs`, {
+                              ruleSetId: ruleSets.find((r) => r.status === 'ACTIVE')?.id,
+                            });
+                            onShowToast && onShowToast(`Payroll run initiated for ${targetPeriod.name}.`);
+                            onRefreshAll && (await onRefreshAll());
+                          } catch (err) {
+                            onShowToast && onShowToast(err?.message || 'Unable to initiate run', 'error');
+                          }
+                        }}
+                        className="px-3.5 py-1.5 bg-[#0088ff] text-white rounded font-medium"
+                      >
+                        + Initiate Payroll Run
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -1010,25 +1071,37 @@ export default function PayrollView({
                     <div className="p-6 text-center text-slate-400">No payroll runs recorded yet.</div>
                   ) : (
                     <div className="divide-y divide-slate-100">
-                      {payrollRuns.map((run) => (
+                      {payrollRuns.map((run) => {
+                        const isSelfPreparer = Boolean(run.preparerId && currentUser?.id && run.preparerId === currentUser.id);
+                        return (
                         <div key={run.id} className="p-4 flex flex-wrap items-center justify-between gap-3 hover:bg-slate-50/70">
                           <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono font-bold text-slate-900">{run.runNumber || run.id.slice(0, 8)}</span>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono font-bold text-slate-900">Run #{run.runNumber || run.id.slice(0, 8)}</span>
                               <span className="font-semibold text-slate-800">{run.period?.name || 'Pay Period'}</span>
+                              {run.runType === 'ADJUSTMENT' && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+                                  ADJUSTMENT
+                                </span>
+                              )}
                               <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                                 run.status === 'LOCKED' ? 'bg-slate-900 text-white' :
                                 run.status === 'APPROVED' ? 'bg-emerald-50 text-emerald-700' :
-                                run.status === 'REVIEWED' || run.status === 'SUBMITTED' ? 'bg-amber-50 text-amber-800' :
+                                run.status === 'UNDER_REVIEW' || run.status === 'REVIEWED' || run.status === 'SUBMITTED' ? 'bg-amber-50 text-amber-800' :
                                 'bg-blue-50 text-[#0088ff]'
                               }`}>{run.status}</span>
+                              {run.auditHash && (
+                                <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600" title={run.auditHash}>
+                                  SHA-256: {run.auditHash.slice(0, 12)}...
+                                </span>
+                              )}
                             </div>
                             <div className="text-[11px] text-slate-500 mt-1">
-                              Gross: KES {Number(run.totalGrossPay || 0).toLocaleString()} • Net: KES {Number(run.totalNetPay || 0).toLocaleString()} • PAYE: KES {Number(run.totalPaye || 0).toLocaleString()}
+                              Employees: {run.totalEmployeesCount || 0} • Gross: KES {Number(run.totalGrossPay || 0).toLocaleString()} • Net: KES {Number(run.totalNetPay || 0).toLocaleString()} • PAYE: KES {Number(run.totalPAYE ?? run.totalPaye ?? 0).toLocaleString()}
                             </div>
                           </div>
                           <div className="flex flex-wrap items-center gap-1.5">
-                            {run.status === 'DRAFT' && (
+                            {canPreparePayroll && (run.status === 'DRAFT' || run.status === 'CALCULATED') && (
                               <button
                                 type="button"
                                 onClick={async () => {
@@ -1045,7 +1118,7 @@ export default function PayrollView({
                                 Calculate
                               </button>
                             )}
-                            {run.status === 'CALCULATED' && (
+                            {(canPreparePayroll || canReviewPayroll) && run.status === 'CALCULATED' && (
                               <button
                                 type="button"
                                 onClick={async () => {
@@ -1062,24 +1135,33 @@ export default function PayrollView({
                                 Submit
                               </button>
                             )}
-                            {(run.status === 'SUBMITTED' || run.status === 'UNDER_REVIEW' || run.status === 'CALCULATED') && (
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  try {
-                                    await apiPost(`/api/v1/payroll/runs/${run.id}/approve`, {});
-                                    onShowToast && onShowToast('Run approved (Maker-Checker verified).');
-                                    onRefreshAll && (await onRefreshAll());
-                                  } catch (err) {
-                                    onShowToast && onShowToast(err?.message || 'Approve failed', 'error');
-                                  }
-                                }}
-                                className="px-2.5 py-1 bg-emerald-600 text-white rounded font-medium"
-                              >
-                                Approve
-                              </button>
+                            {canApprovePayroll && (run.status === 'UNDER_REVIEW' || run.status === 'SUBMITTED' || run.status === 'CALCULATED') && (
+                              isSelfPreparer ? (
+                                <span
+                                  title="Maker-Checker enforced: Preparer cannot approve their own payroll run"
+                                  className="px-2.5 py-1 rounded border border-amber-300 bg-amber-50 text-amber-800 text-[11px] font-medium cursor-not-allowed"
+                                >
+                                  Maker-Checker: Self-Approval Blocked
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    try {
+                                      await apiPost(`/api/v1/payroll/runs/${run.id}/approve`, {});
+                                      onShowToast && onShowToast('Run approved (Maker-Checker verified).');
+                                      onRefreshAll && (await onRefreshAll());
+                                    } catch (err) {
+                                      onShowToast && onShowToast(err?.message || 'Approve failed', 'error');
+                                    }
+                                  }}
+                                  className="px-2.5 py-1 bg-emerald-600 text-white rounded font-medium"
+                                >
+                                  Approve
+                                </button>
+                              )
                             )}
-                            {run.status === 'APPROVED' && (
+                            {canLockPayroll && run.status === 'APPROVED' && (
                               <button
                                 type="button"
                                 onClick={async () => {
@@ -1096,45 +1178,73 @@ export default function PayrollView({
                                 Lock Run
                               </button>
                             )}
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  const rec = await apiPost(`/api/v1/payroll/runs/${run.id}/reconcile`, {});
-                                  setReconData(rec);
-                                  onShowToast && onShowToast('Reconciliation variance report generated.');
-                                } catch (err) {
-                                  onShowToast && onShowToast(err?.message || 'Reconcile error', 'error');
-                                }
-                              }}
-                              className="px-2.5 py-1 border border-slate-300 rounded hover:bg-slate-50"
-                            >
-                              Reconcile
-                            </button>
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  const res = await apiPost(`/api/v1/payroll/runs/${run.id}/export-bank`, { bankFormatCode: 'STANDARD_EFT_CSV' });
-                                  if (res?.csvContent) {
-                                    const blob = new Blob([res.csvContent], { type: 'text/csv' });
-                                    const url = URL.createObjectURL(blob);
-                                    const a = document.createElement('a');
-                                    a.href = url;
-                                    a.download = res.fileName || `eft-schedule-${run.id}.csv`;
-                                    a.click();
-                                    URL.revokeObjectURL(url);
+                            {canViewPayrollReports && Number(run.totalEmployeesCount || 0) > 0 && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    const slipsRes = await apiGet(`/api/v1/payroll/runs/${run.id}/slips`);
+                                    setRunSlipsPanel({ run, slips: unwrapList(slipsRes) });
+                                  } catch (err) {
+                                    onShowToast && onShowToast(err?.message || 'Unable to load payslips', 'error');
                                   }
-                                  onShowToast && onShowToast('Bank EFT schedule exported.');
-                                } catch (err) {
-                                  onShowToast && onShowToast(err?.message || 'Export restricted', 'error');
-                                }
-                              }}
-                              className="px-2.5 py-1 border border-slate-300 rounded hover:bg-slate-50 inline-flex items-center gap-1"
-                            >
-                              <Download size={12} /> Bank EFT
-                            </button>
-                            {run.status === 'LOCKED' && (
+                                }}
+                                className="px-2.5 py-1 border border-slate-300 rounded hover:bg-slate-50 inline-flex items-center gap-1"
+                              >
+                                <Eye size={12} /> View Slips
+                              </button>
+                            )}
+                            {canViewPayrollReports && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    const rec = await apiPost(`/api/v1/payroll/runs/${run.id}/reconcile`, {});
+                                    setReconData(rec);
+                                    onShowToast && onShowToast('Reconciliation variance report generated.');
+                                  } catch (err) {
+                                    onShowToast && onShowToast(err?.message || 'Reconcile error', 'error');
+                                  }
+                                }}
+                                className="px-2.5 py-1 border border-slate-300 rounded hover:bg-slate-50"
+                              >
+                                Reconcile
+                              </button>
+                            )}
+                            {canExportPayroll && Number(run.totalEmployeesCount || 0) > 0 && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    const res = await apiPost(`/api/v1/payroll/runs/${run.id}/export-bank`, { bankFormatCode: 'STANDARD_EFT_CSV' });
+                                    if (res?.csvContent) {
+                                      const blob = new Blob([res.csvContent], { type: 'text/csv' });
+                                      const url = URL.createObjectURL(blob);
+                                      const a = document.createElement('a');
+                                      a.href = url;
+                                      a.download = res.fileName || `eft-schedule-${run.id}.csv`;
+                                      a.click();
+                                      URL.revokeObjectURL(url);
+                                    }
+                                    setBankExportSummary({
+                                      fileName: res?.fileName || `eft-schedule-${run.id}.csv`,
+                                      totalAmount: res?.totalAmount || 0,
+                                      recordCount: res?.recordCount || 0,
+                                      fileChecksum: res?.exportRecord?.fileChecksum || '',
+                                      notice: res?.notice || 'Bank transfer schedule exported.',
+                                      scheduleRows: res?.scheduleRows || [],
+                                    });
+                                    onShowToast && onShowToast('Bank EFT schedule exported.');
+                                  } catch (err) {
+                                    onShowToast && onShowToast(err?.message || 'Export restricted', 'error');
+                                  }
+                                }}
+                                className="px-2.5 py-1 border border-slate-300 rounded hover:bg-slate-50 inline-flex items-center gap-1"
+                              >
+                                <Download size={12} /> Bank EFT
+                              </button>
+                            )}
+                            {canAdjustPayroll && run.status === 'LOCKED' && (
                               <button
                                 type="button"
                                 onClick={async () => {
@@ -1153,10 +1263,77 @@ export default function PayrollView({
                             )}
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
+
+                {bankExportSummary && (
+                  <div className="bg-emerald-50/70 rounded-md border border-emerald-200 p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-semibold text-emerald-900">
+                        Bank EFT Export Confirmed — {bankExportSummary.fileName}
+                      </h4>
+                      <button type="button" onClick={() => setBankExportSummary(null)} className="text-emerald-700 hover:underline">Close</button>
+                    </div>
+                    <p className="text-emerald-800">{bankExportSummary.notice}</p>
+                    <div className="text-[11px] font-mono text-emerald-900">
+                      Records: {bankExportSummary.recordCount} • Total Net: KES {Number(bankExportSummary.totalAmount || 0).toLocaleString()} • SHA-256 Checksum: {bankExportSummary.fileChecksum}
+                    </div>
+                  </div>
+                )}
+
+                {runSlipsPanel && (
+                  <div className="bg-white rounded-md border border-slate-200 overflow-hidden">
+                    <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                      <span className="font-semibold text-slate-800">
+                        Generated Payslips — Run #{runSlipsPanel.run?.runNumber} ({runSlipsPanel.run?.period?.name || 'Period'}, {runSlipsPanel.slips.length} employees)
+                      </span>
+                      <button type="button" onClick={() => setRunSlipsPanel(null)} className="text-slate-500 hover:text-slate-800">Close</button>
+                    </div>
+                    <table className="w-full text-left border-collapse">
+                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+                        <tr>
+                          <th className="py-2 px-4">Employee</th>
+                          <th className="py-2 px-4">Bank (Masked)</th>
+                          <th className="py-2 px-4">Gross Pay (KES)</th>
+                          <th className="py-2 px-4">PAYE</th>
+                          <th className="py-2 px-4">NSSF + SHIF + AHL</th>
+                          <th className="py-2 px-4">Net Pay (KES)</th>
+                          <th className="py-2 px-4 text-right">Statement</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {runSlipsPanel.slips.map((ps) => {
+                          const { payeAmt, statutoryOther } = getSlipDeductionSummary(ps);
+                          return (
+                            <tr key={ps.id} className="hover:bg-slate-50">
+                              <td className="py-2.5 px-4 font-medium text-slate-800">
+                                {ps.employeeName} <span className="font-mono text-[10px] text-slate-400">({ps.employeeRef})</span>
+                              </td>
+                              <td className="py-2.5 px-4 font-mono text-[11px] text-slate-500">{ps.accountNumberMasked || '****0000'}</td>
+                              <td className="py-2.5 px-4">{Number(ps.grossPay || 0).toLocaleString()}</td>
+                              <td className="py-2.5 px-4 text-rose-600">{payeAmt.toLocaleString()}</td>
+                              <td className="py-2.5 px-4 text-slate-600">{statutoryOther.toLocaleString()}</td>
+                              <td className="py-2.5 px-4 font-bold text-emerald-700">{Number(ps.netPay || 0).toLocaleString()}</td>
+                              <td className="py-2.5 px-4 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenPayslipModal && onOpenPayslipModal(ps)}
+                                  className="inline-flex items-center gap-1 text-[#0088ff] hover:underline font-medium"
+                                >
+                                  <Eye size={13} />
+                                  <span>View Payslip</span>
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
 
                 {reconData && (
                   <div className="bg-white rounded-md border border-slate-200 p-4 space-y-2">
@@ -1189,7 +1366,7 @@ export default function PayrollView({
                 <table className="w-full text-left border-collapse">
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
                     <tr>
-                      <th className="py-2.5 px-4">Employee</th>
+                      <th className="py-2.5 px-4">Employee / Period</th>
                       <th className="py-2.5 px-4">Gross Pay (KES)</th>
                       <th className="py-2.5 px-4">PAYE</th>
                       <th className="py-2.5 px-4">NSSF + SHIF + AHL</th>
@@ -1198,16 +1375,19 @@ export default function PayrollView({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {payslips.map((ps) => (
+                    {payslips.map((ps) => {
+                      const { payeAmt, statutoryOther } = getSlipDeductionSummary(ps);
+                      return (
                       <tr key={ps.id} className="hover:bg-slate-50">
                         <td className="py-2.5 px-4 font-medium text-slate-800">
-                          {ps.employee?.fullName || ps.employeeId}
+                          <div>{ps.employeeName || (ps.employee ? `${ps.employee.firstName} ${ps.employee.lastName}` : ps.employeeId)}</div>
+                          <div className="text-[10px] text-slate-400">
+                            {ps.period?.name || 'Monthly Payroll'} {ps.employeeRef ? `• ${ps.employeeRef}` : ''}
+                          </div>
                         </td>
                         <td className="py-2.5 px-4">{Number(ps.grossPay || 0).toLocaleString()}</td>
-                        <td className="py-2.5 px-4 text-rose-600">{Number(ps.payeTax || 0).toLocaleString()}</td>
-                        <td className="py-2.5 px-4 text-slate-600">
-                          {Number((ps.nssfDeduction || 0) + (ps.shifDeduction || 0) + (ps.housingLevy || 0)).toLocaleString()}
-                        </td>
+                        <td className="py-2.5 px-4 text-rose-600">{payeAmt.toLocaleString()}</td>
+                        <td className="py-2.5 px-4 text-slate-600">{statutoryOther.toLocaleString()}</td>
                         <td className="py-2.5 px-4 font-bold text-emerald-700">{Number(ps.netPay || 0).toLocaleString()}</td>
                         <td className="py-2.5 px-4 text-right">
                           <button
@@ -1220,7 +1400,8 @@ export default function PayrollView({
                           </button>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
@@ -1232,123 +1413,274 @@ export default function PayrollView({
         {activeLeftTab === 'salaries' && (
           <div className="space-y-4 max-w-5xl">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <form
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  try {
-                    await apiPost('/api/v1/payroll/pay-groups', {
-                      ...payGroupForm,
-                      cutoffDay: Number(payGroupForm.cutoffDay) || 20,
-                    });
-                    setPayGroupForm({ code: '', name: '', payFrequency: 'MONTHLY', cutoffDay: 20 });
-                    onShowToast && onShowToast('Pay Group created.');
-                    onRefreshAll && (await onRefreshAll());
-                  } catch (err) {
-                    onShowToast && onShowToast(err?.message || 'Failed to create pay group', 'error');
-                  }
-                }}
-                className="bg-white rounded-md border border-slate-200 p-4 space-y-2.5"
-              >
-                <h4 className="font-semibold text-slate-800">Create Pay Group ({salaryStructures.length})</h4>
-                <div className="grid grid-cols-2 gap-2">
-                  <input required placeholder="Code (e.g. EXEC)" value={payGroupForm.code} onChange={(e) => setPayGroupForm({ ...payGroupForm, code: e.target.value })} className="px-2.5 py-1.5 border rounded" />
-                  <input required placeholder="Name" value={payGroupForm.name} onChange={(e) => setPayGroupForm({ ...payGroupForm, name: e.target.value })} className="px-2.5 py-1.5 border rounded" />
-                </div>
-                <button type="submit" className="px-3.5 py-1.5 bg-[#0088ff] text-white rounded font-medium">Create Pay Group</button>
-              </form>
+              {canManagePayrollConfig && (
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    try {
+                      await apiPost('/api/v1/payroll/pay-groups', {
+                        ...payGroupForm,
+                        cutoffDay: Number(payGroupForm.cutoffDay) || 20,
+                      });
+                      setPayGroupForm({ code: '', name: '', payFrequency: 'MONTHLY', cutoffDay: 20 });
+                      onShowToast && onShowToast('Pay Group created.');
+                      onRefreshAll && (await onRefreshAll());
+                    } catch (err) {
+                      onShowToast && onShowToast(err?.message || 'Failed to create pay group', 'error');
+                    }
+                  }}
+                  className="bg-white rounded-md border border-slate-200 p-4 space-y-2.5"
+                >
+                  <h4 className="font-semibold text-slate-800">Create Pay Group ({salaryStructures.length})</h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input required placeholder="Code (e.g. EXEC)" value={payGroupForm.code} onChange={(e) => setPayGroupForm({ ...payGroupForm, code: e.target.value })} className="px-2.5 py-1.5 border rounded" />
+                    <input required placeholder="Name" value={payGroupForm.name} onChange={(e) => setPayGroupForm({ ...payGroupForm, name: e.target.value })} className="px-2.5 py-1.5 border rounded" />
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {salaryStructures.map((pg) => (
+                      <span key={pg.id} className="px-2 py-0.5 bg-slate-100 rounded text-[11px] text-slate-700">
+                        {pg.code} • {pg.name}
+                      </span>
+                    ))}
+                  </div>
+                  <button type="submit" className="px-3.5 py-1.5 bg-[#0088ff] text-white rounded font-medium">Create Pay Group</button>
+                </form>
+              )}
 
-              <form
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  try {
-                    await apiPost('/api/v1/payroll/periods', {
-                      ...periodForm,
-                      periodNumber: Number(periodForm.periodNumber),
-                      fiscalYear: Number(periodForm.fiscalYear),
-                    });
-                    onShowToast && onShowToast('Payroll Period created.');
-                    onRefreshAll && (await onRefreshAll());
-                  } catch (err) {
-                    onShowToast && onShowToast(err?.message || 'Failed to create period', 'error');
-                  }
-                }}
-                className="bg-white rounded-md border border-slate-200 p-4 space-y-2.5"
-              >
-                <h4 className="font-semibold text-slate-800">Open New Pay Period ({payPeriods.length})</h4>
-                <div className="grid grid-cols-2 gap-2">
-                  <input required placeholder="Period Name" value={periodForm.name} onChange={(e) => setPeriodForm({ ...periodForm, name: e.target.value })} className="px-2.5 py-1.5 border rounded" />
-                  <input type="number" min="1" max="12" value={periodForm.periodNumber} onChange={(e) => setPeriodForm({ ...periodForm, periodNumber: e.target.value })} className="px-2.5 py-1.5 border rounded" />
-                </div>
-                <button type="submit" className="px-3.5 py-1.5 bg-[#0088ff] text-white rounded font-medium">Open Pay Period</button>
-              </form>
+              {canPreparePayroll && (
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    try {
+                      await apiPost('/api/v1/payroll/periods', {
+                        ...periodForm,
+                        periodNumber: Number(periodForm.periodNumber),
+                        fiscalYear: Number(periodForm.fiscalYear),
+                      });
+                      onShowToast && onShowToast('Payroll Period created.');
+                      onRefreshAll && (await onRefreshAll());
+                    } catch (err) {
+                      onShowToast && onShowToast(err?.message || 'Failed to create period', 'error');
+                    }
+                  }}
+                  className="bg-white rounded-md border border-slate-200 p-4 space-y-2.5"
+                >
+                  <h4 className="font-semibold text-slate-800">Open New Pay Period ({payPeriods.length})</h4>
+                  <div className="grid grid-cols-3 gap-2">
+                    <select value={periodForm.payGroupId} onChange={(e) => setPeriodForm({ ...periodForm, payGroupId: e.target.value })} className="px-2 py-1.5 border rounded bg-white">
+                      {salaryStructures.map((pg) => <option key={pg.id} value={pg.id}>{pg.code}</option>)}
+                    </select>
+                    <input required placeholder="Period Name" value={periodForm.name} onChange={(e) => setPeriodForm({ ...periodForm, name: e.target.value })} className="px-2.5 py-1.5 border rounded" />
+                    <input type="number" min="1" max="12" value={periodForm.periodNumber} onChange={(e) => setPeriodForm({ ...periodForm, periodNumber: e.target.value })} className="px-2.5 py-1.5 border rounded" />
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {payPeriods.map((pp) => (
+                      <span key={pp.id} className="px-2 py-0.5 bg-slate-100 rounded text-[11px] text-slate-700">
+                        {pp.periodCode} ({pp.status})
+                      </span>
+                    ))}
+                  </div>
+                  <button type="submit" className="px-3.5 py-1.5 bg-[#0088ff] text-white rounded font-medium">Open Pay Period</button>
+                </form>
+              )}
             </div>
 
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                try {
-                  await apiPost('/api/v1/payroll/salaries/assign', {
-                    employeeId: assignForm.employeeId,
-                    payGroupId: assignForm.payGroupId || undefined,
-                    effectiveDate: assignForm.effectiveDate,
-                    components: { BASIC: Number(assignForm.basicSalaryKes) || 0 },
-                    changeReason: assignForm.changeReason,
-                  });
-                  onShowToast && onShowToast('Employee compensation assigned cleanly.');
-                } catch (err) {
-                  onShowToast && onShowToast(err?.message || 'Salary assignment failed', 'error');
-                }
-              }}
-              className="bg-white rounded-md border border-slate-200 p-5 grid grid-cols-1 md:grid-cols-4 gap-3 items-end"
-            >
-              <div className="md:col-span-4 font-semibold text-slate-800">Assign Employee Salary Package</div>
-              <div>
-                <label className="block text-slate-500 mb-1">Employee</label>
-                <select value={assignForm.employeeId} onChange={(e) => setAssignForm({ ...assignForm, employeeId: e.target.value })} className="w-full px-2.5 py-1.5 border rounded bg-white">
-                  {employees.map((em) => <option key={em.id} value={em.id}>{em.firstName} {em.lastName}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-slate-500 mb-1">Monthly Basic (KES)</label>
-                <input type="number" required value={assignForm.basicSalaryKes} onChange={(e) => setAssignForm({ ...assignForm, basicSalaryKes: e.target.value })} className="w-full px-2.5 py-1.5 border rounded" />
-              </div>
-              <div>
-                <label className="block text-slate-500 mb-1">Revision Reason</label>
-                <select value={assignForm.changeReason} onChange={(e) => setAssignForm({ ...assignForm, changeReason: e.target.value })} className="w-full px-2.5 py-1.5 border rounded bg-white">
-                  {revisionReasons.map((r) => <option key={r.id} value={r.name}>{r.name}</option>)}
-                </select>
-              </div>
-              <button type="submit" className="px-4 py-2 bg-emerald-600 text-white rounded font-medium">Assign Salary</button>
-            </form>
+            {canManagePayrollConfig && (
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  try {
+                    const compsPayload = { BASIC: Number(assignForm.basicSalaryKes) || 0 };
+                    if (Number(assignForm.houseAllwKes) > 0) compsPayload.HOUSE_ALLW = Number(assignForm.houseAllwKes);
+                    if (Number(assignForm.commuterAllwKes) > 0) compsPayload.COMMUTER_ALLW = Number(assignForm.commuterAllwKes);
+                    await apiPost('/api/v1/payroll/salaries/assign', {
+                      employeeId: assignForm.employeeId,
+                      payGroupId: assignForm.payGroupId || undefined,
+                      effectiveDate: assignForm.effectiveDate,
+                      components: compsPayload,
+                      changeReason: assignForm.changeReason,
+                    });
+                    onShowToast && onShowToast('Employee compensation assigned cleanly.');
+                  } catch (err) {
+                    onShowToast && onShowToast(err?.message || 'Salary assignment failed', 'error');
+                  }
+                }}
+                className="bg-white rounded-md border border-slate-200 p-5 space-y-3"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-semibold text-slate-800">Assign Employee Salary Package</span>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!assignForm.employeeId) return;
+                      try {
+                        const sal = await apiGet(`/api/v1/payroll/salaries/employee/${assignForm.employeeId}`);
+                        setEmployeeSalaryPreview(sal);
+                        onShowToast && onShowToast('Loaded active effective-dated salary assignment.');
+                      } catch (err) {
+                        setEmployeeSalaryPreview(null);
+                        onShowToast && onShowToast(err?.message || 'No active salary assignment found', 'error');
+                      }
+                    }}
+                    className="px-3 py-1 border border-slate-300 rounded text-slate-700 hover:bg-slate-50"
+                  >
+                    Inspect Current Package
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+                  <div className="md:col-span-2">
+                    <label className="block text-slate-500 mb-1">Employee</label>
+                    <select value={assignForm.employeeId} onChange={(e) => setAssignForm({ ...assignForm, employeeId: e.target.value })} className="w-full px-2.5 py-1.5 border rounded bg-white">
+                      {employees.map((em) => <option key={em.id} value={em.id}>{em.firstName} {em.lastName} ({em.employeeNumber})</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-slate-500 mb-1">Basic (KES)</label>
+                    <input type="number" required value={assignForm.basicSalaryKes} onChange={(e) => setAssignForm({ ...assignForm, basicSalaryKes: e.target.value })} className="w-full px-2.5 py-1.5 border rounded" />
+                  </div>
+                  <div>
+                    <label className="block text-slate-500 mb-1">House Allw (KES)</label>
+                    <input type="number" min="0" value={assignForm.houseAllwKes} onChange={(e) => setAssignForm({ ...assignForm, houseAllwKes: e.target.value })} className="w-full px-2.5 py-1.5 border rounded" />
+                  </div>
+                  <div>
+                    <label className="block text-slate-500 mb-1">Commuter (KES)</label>
+                    <input type="number" min="0" value={assignForm.commuterAllwKes} onChange={(e) => setAssignForm({ ...assignForm, commuterAllwKes: e.target.value })} className="w-full px-2.5 py-1.5 border rounded" />
+                  </div>
+                  <div>
+                    <label className="block text-slate-500 mb-1">Revision Reason</label>
+                    <select value={assignForm.changeReason} onChange={(e) => setAssignForm({ ...assignForm, changeReason: e.target.value })} className="w-full px-2.5 py-1.5 border rounded bg-white">
+                      {revisionReasons.map((r) => <option key={r.id} value={r.name}>{r.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <button type="submit" className="px-4 py-2 bg-emerald-600 text-white rounded font-medium">Assign Salary</button>
+                </div>
+                {employeeSalaryPreview && (
+                  <div className="p-3 bg-slate-50 rounded border border-slate-200 text-[11px] font-mono">
+                    Active Package ({employeeSalaryPreview.status}, Effective {employeeSalaryPreview.effectiveDate?.slice(0, 10)}): Total Gross KES {Number(employeeSalaryPreview.totalGrossSalary || 0).toLocaleString()} • Breakdown: {employeeSalaryPreview.components}
+                  </div>
+                )}
+              </form>
+            )}
           </div>
         )}
 
         {/* 5C. STATUTORY RULE SETS */}
         {activeLeftTab === 'rulesets' && (
-          <div className="bg-white rounded-md border border-slate-200 p-5 max-w-5xl space-y-3">
-            <h4 className="font-semibold text-slate-800">Configured Kenyan Statutory Rule Sets ({ruleSets.length})</h4>
+          <div className="bg-white rounded-md border border-slate-200 p-5 max-w-5xl space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="font-semibold text-slate-800">Configured Kenyan Statutory Rule Sets ({ruleSets.length})</h4>
+              {canManagePayrollConfig && (
+                <button
+                  type="button"
+                  onClick={() => setShowDraftRuleSetForm((v) => !v)}
+                  className="px-3 py-1.5 bg-[#0088ff] text-white rounded font-medium inline-flex items-center gap-1"
+                >
+                  <Plus size={13} /> Propose Draft Rule Set
+                </button>
+              )}
+            </div>
+
+            {showDraftRuleSetForm && canManagePayrollConfig && (
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  try {
+                    const baseRs = ruleSets.find((r) => r.status === 'ACTIVE') || ruleSets[0];
+                    const clonedRules = (baseRs?.rules || []).map((r) => {
+                      let parsed = typeof r.parameters === 'string' ? JSON.parse(r.parameters) : r.parameters;
+                      if (r.code === 'PAYE' && parsed) {
+                        parsed = { ...parsed, personalReliefMonthly: Number(draftRuleSetForm.personalReliefMonthly) || 2400 };
+                      }
+                      return {
+                        code: r.code,
+                        name: r.name,
+                        category: r.category,
+                        algorithmType: r.algorithmType,
+                        parameters: parsed,
+                        deductibleFromTaxablePay: Boolean(r.deductibleFromTaxablePay),
+                        reliefPercentage: r.reliefPercentage ?? undefined,
+                        reliefMaxMonthly: r.reliefMaxMonthly ?? undefined,
+                        isEmployeeDeduction: Boolean(r.isEmployeeDeduction),
+                        isEmployerContribution: Boolean(r.isEmployerContribution),
+                        roundingRule: r.roundingRule || 'ROUND_HALF_UP',
+                        priority: r.priority || 10,
+                      };
+                    });
+                    await apiPost('/api/v1/payroll/rule-sets', {
+                      code: draftRuleSetForm.code.trim(),
+                      name: draftRuleSetForm.name.trim(),
+                      countryCode: 'KE',
+                      effectiveFrom: draftRuleSetForm.effectiveFrom,
+                      description: 'Draft statutory revision proposed for Maker-Checker review',
+                      rules: clonedRules,
+                    });
+                    setShowDraftRuleSetForm(false);
+                    onShowToast && onShowToast('Draft statutory rule set proposed (pending distinct partner activation).');
+                    await loadPayrollExtras();
+                  } catch (err) {
+                    onShowToast && onShowToast(err?.message || 'Failed to propose rule set', 'error');
+                  }
+                }}
+                className="p-4 rounded border border-blue-200 bg-blue-50/40 grid grid-cols-1 md:grid-cols-4 gap-3 items-end"
+              >
+                <div>
+                  <label className="block text-slate-600 mb-1">Rule Set Code</label>
+                  <input required value={draftRuleSetForm.code} onChange={(e) => setDraftRuleSetForm({ ...draftRuleSetForm, code: e.target.value })} className="w-full px-2.5 py-1.5 border rounded bg-white" />
+                </div>
+                <div>
+                  <label className="block text-slate-600 mb-1">Name</label>
+                  <input required value={draftRuleSetForm.name} onChange={(e) => setDraftRuleSetForm({ ...draftRuleSetForm, name: e.target.value })} className="w-full px-2.5 py-1.5 border rounded bg-white" />
+                </div>
+                <div>
+                  <label className="block text-slate-600 mb-1">Personal Relief (KES/mo)</label>
+                  <input type="number" value={draftRuleSetForm.personalReliefMonthly} onChange={(e) => setDraftRuleSetForm({ ...draftRuleSetForm, personalReliefMonthly: e.target.value })} className="w-full px-2.5 py-1.5 border rounded bg-white" />
+                </div>
+                <button type="submit" className="px-4 py-1.5 bg-emerald-600 text-white rounded font-medium">Submit Draft</button>
+              </form>
+            )}
+
             <div className="divide-y divide-slate-100">
-              {ruleSets.map((rs) => (
-                <div key={rs.id} className="py-3 flex items-center justify-between">
+              {ruleSets.map((rs) => {
+                const isSelfProposer = Boolean(rs.proposedById && currentUser?.id && rs.proposedById === currentUser.id);
+                return (
+                <div key={rs.id} className="py-3 flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <div className="font-semibold text-slate-800">{rs.code} — {rs.name}</div>
-                    <div className="text-[11px] text-slate-500">Status: {rs.status} • Effective: {rs.effectiveFrom?.slice(0, 10)}</div>
+                    <div className="text-[11px] text-slate-500">
+                      Status: <span className="font-semibold">{rs.status}</span> • Version: {rs.version} • Effective: {rs.effectiveFrom?.slice(0, 10)} • Rules: {(rs.rules || []).map((r) => r.code).join(', ')}
+                    </div>
                   </div>
-                  {rs.status !== 'ACTIVE' && (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        await apiPost(`/api/v1/payroll/rule-sets/${rs.id}/activate`, {});
-                        onShowToast && onShowToast('Rule set activated.');
-                        await loadPayrollExtras();
-                      }}
-                      className="px-3 py-1 bg-[#0088ff] text-white rounded font-medium"
-                    >
-                      Activate Rule Set
-                    </button>
+                  {rs.status !== 'ACTIVE' && canManagePayrollConfig && (
+                    isSelfProposer ? (
+                      <span
+                        title="Maker-Checker enforced: Proposer cannot self-activate their own rule set"
+                        className="px-2.5 py-1 rounded border border-amber-300 bg-amber-50 text-amber-800 text-[11px] font-medium cursor-not-allowed"
+                      >
+                        Maker-Checker: Proposer Cannot Self-Activate
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await apiPost(`/api/v1/payroll/rule-sets/${rs.id}/activate`, {});
+                            onShowToast && onShowToast('Rule set activated.');
+                            await loadPayrollExtras();
+                          } catch (err) {
+                            onShowToast && onShowToast(err?.message || 'Activation failed', 'error');
+                          }
+                        }}
+                        className="px-3 py-1 bg-[#0088ff] text-white rounded font-medium"
+                      >
+                        Activate Rule Set
+                      </button>
+                    )
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

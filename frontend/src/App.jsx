@@ -130,6 +130,7 @@ export default function App() {
     const perms = new Set(userOverride?.permissions || []);
     const canViewEmployees =
       perms.size === 0 || perms.has('employees.view') || perms.has('employees.view_team');
+    const canViewPayrollRuns = perms.size === 0 || perms.has('payroll.reports.view');
     const endpoints = [
       ...(canViewEmployees ? [['/api/v1/employees?limit=100', setEmployees]] : []),
       ['/api/v1/leave/balances', setLeaveBalances],
@@ -140,7 +141,7 @@ export default function App() {
       ['/api/v1/tasks/inbox', setTasks],
       ['/api/v1/notifications', setNotifications],
       ['/api/v1/payroll/periods', setPayPeriods],
-      ['/api/v1/payroll/runs', setPayrollRuns],
+      ...(canViewPayrollRuns ? [['/api/v1/payroll/runs', setPayrollRuns]] : []),
       ['/api/v1/payroll/slips/me', setPayslips],
       ['/api/v1/payroll/pay-groups', setSalaryStructures],
       ['/api/v1/performance/cycles', setPerformanceCycles],

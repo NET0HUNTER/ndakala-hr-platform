@@ -290,7 +290,7 @@ export function createPayrollRouter(deps: AppDeps): Router {
   registerRoute(router, deps, {
     method: 'post',
     path: '/payroll/runs/:id/submit',
-    auth: { permission: 'payroll.prepare' },
+    auth: { permission: ['payroll.prepare', 'payroll.review'], any: true },
     handler: async ({ params, auth, req }) => {
       return service.submitRunForReview(params.id, auth.userId, auditCtx(auth, req));
     },

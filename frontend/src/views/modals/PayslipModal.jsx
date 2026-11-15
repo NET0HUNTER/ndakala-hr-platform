@@ -71,12 +71,12 @@ export function PayslipModal({ isOpen, onClose, slip, onDownloadPdf }) {
               <span className="font-bold text-slate-900 text-xs">
                 {slip.employee ? `${slip.employee.firstName} ${slip.employee.lastName}` : slip.employeeName || 'Staff Member'}
               </span>
-              <span className="text-slate-500 block font-mono">{slip.employee?.employeeNumber || slip.slipNumber || 'NDA-STAFF'}</span>
+              <span className="text-slate-500 block font-mono">{slip.employee?.employeeNumber || slip.employeeRef || slip.slipNumber || 'NDA-STAFF'}</span>
             </div>
             <div>
               <span className="text-slate-400 block font-semibold uppercase text-[10px]">Pay Period</span>
               <span className="font-bold text-slate-800">
-                {slip.period?.name || slip.payrollRun?.period?.name || 'Monthly Payroll'}
+                {slip.period?.name || slip.run?.period?.name || slip.payrollRun?.period?.name || 'Monthly Payroll'}
               </span>
               <span className="text-slate-500 block">Currency: KES</span>
             </div>
@@ -124,7 +124,9 @@ export function PayslipModal({ isOpen, onClose, slip, onDownloadPdf }) {
             <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
               <div className="bg-slate-50 px-4 py-2.5 border-b border-slate-200 font-bold text-xs text-slate-900 flex justify-between">
                 <span>Statutory & Other Deductions</span>
-                <span className="text-rose-700 font-mono">-KES {fmt(slip.totalDeductions)}</span>
+                <span className="text-rose-700 font-mono">
+                  -KES {fmt(slip.totalEmployeeDeductions ?? slip.totalDeductions ?? deductions.reduce((s, d) => s + Number(d.amount || 0), 0))}
+                </span>
               </div>
               <table className="w-full text-left">
                 <tbody className="divide-y divide-slate-100 text-xs">
@@ -174,7 +176,7 @@ export function PayslipModal({ isOpen, onClose, slip, onDownloadPdf }) {
             <div className="bg-slate-50 px-4 py-2 border-b border-slate-200 font-bold text-xs text-slate-900 flex justify-between items-center">
               <span>Employer Statutory Contributions (NSSF & Housing Levy Match)</span>
               <span className="text-slate-600 font-mono text-[11px]">
-                Total Employer Cost: KES {fmt(slip.totalEmployerCost || Number(slip.grossPay || 0) + Number(slip.employerContributionsTotal || 0))}
+                Total Employer Cost: KES {fmt(slip.totalEmployerCosts ?? slip.totalEmployerCost ?? Number(slip.grossPay || 0) + Number(slip.employerContributionsTotal || 0))}
               </span>
             </div>
             {employerContribs.length > 0 && (
