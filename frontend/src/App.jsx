@@ -378,16 +378,24 @@ export default function App() {
     }
   };
 
-  const handleConfirmProbation = async (probationId, decision = 'CONFIRMED') => {
+  const handleConfirmProbation = async (
+    probationId,
+    decision = 'CONFIRMED',
+    decisionReason = 'Completed probation evaluation in HR portal',
+  ) => {
     try {
       await apiPost(`/api/v1/employees/probation/${probationId}/decision`, {
         decision,
-        decisionReason: 'Completed probation evaluation in HR portal',
+        decisionReason: (decisionReason || '').trim().length >= 5
+          ? decisionReason.trim()
+          : 'Completed probation evaluation in HR portal',
       });
       showToast(`Probation ${decision.toLowerCase()} recorded.`);
       await fetchAllData();
+      return true;
     } catch (err) {
       showToast(err?.message || 'Failed to submit probation decision', 'error');
+      return false;
     }
   };
 

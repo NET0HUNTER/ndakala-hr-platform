@@ -168,11 +168,17 @@ export async function createEmployee(prisma: PrismaClient, auth: AuthContext, in
       );
     }
   }
-  if (input.userId) {
-    const user = await prisma.user.findUnique({ where: { id: input.userId } });
+  let resolvedUserId: string | null = input.userId ?? null;
+  if (resolvedUserId) {
+    const user = await prisma.user.findUnique({ where: { id: resolvedUserId } });
     if (!user) throw validation('Linked user account does not exist');
-    if (await prisma.employee.findUnique({ where: { userId: input.userId } })) {
+    if (await prisma.employee.findUnique({ where: { userId: resolvedUserId } })) {
       throw conflict('The user account is already linked to another employee record');
+    }
+  } else {
+    const matchingUser = await prisma.user.findUnique({ where: { email: input.workEmail.toLowerCase() } });
+    if (matchingUser && !(await prisma.employee.findUnique({ where: { userId: matchingUser.id } }))) {
+      resolvedUserId = matchingUser.id;
     }
   }
 
@@ -200,7 +206,7 @@ export async function createEmployee(prisma: PrismaClient, auth: AuthContext, in
     const employee = await tx.employee.create({
       data: {
         employeeNumber,
-        userId: input.userId ?? null,
+        userId: resolvedUserId,
         firstName: input.firstName,
         middleName: input.middleName,
         lastName: input.lastName,
@@ -298,7 +304,12 @@ export async function createEmployee(prisma: PrismaClient, auth: AuthContext, in
             description: item.description,
             ownerType: item.ownerType,
             assignedRoleKey: OWNER_ROLE[item.ownerType] ?? null,
-            assignedUserId: item.ownerType === 'MANAGER' ? managerUserId : item.ownerType === 'EMPLOYEE' ? input.userId ?? null : null,
+            assignedUserId:
+              item.ownerType === 'MANAGER'
+                ? managerUserId
+                : item.ownerType === 'EMPLOYEE'
+                  ? resolvedUserId
+                  : null,
             dueDate: item.dueDaysAfterStart !== null ? addDays(startDate, item.dueDaysAfterStart) : null,
             evidenceRequired: item.evidenceRequired,
             escalateAfterDaysOverdue: item.escalateAfterDaysOverdue,

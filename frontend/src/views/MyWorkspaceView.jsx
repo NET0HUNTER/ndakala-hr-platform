@@ -233,6 +233,7 @@ export default function MyWorkspaceView({
   const [orgLocations, setOrgLocations] = useState([]);
   const [orgAnnouncementInput, setOrgAnnouncementInput] = useState('');
   const [policyAcks, setPolicyAcks] = useState([]);
+  const [myOnboardingTasks, setMyOnboardingTasks] = useState([]);
 
   useEffect(() => {
     if (subViewHint === 'approvals') {
@@ -241,10 +242,15 @@ export default function MyWorkspaceView({
     }
   }, [subViewHint]);
 
+  const refreshMyOnboardingTasks = async () => {
+    const res = await apiGet('/api/v1/onboarding-tasks/mine').catch(() => []);
+    setMyOnboardingTasks(unwrapList(res));
+  };
+
   useEffect(() => {
     async function loadWorkspaceData() {
       try {
-        const [attRes, feedsRes, delRes, widgetRes, favRes, survRes, orgRes, deptsRes, locsRes, acksRes] = await Promise.all([
+        const [attRes, feedsRes, delRes, widgetRes, favRes, survRes, orgRes, deptsRes, locsRes, acksRes, onbRes] = await Promise.all([
           apiGet('/api/v1/workspace/attendance').catch(() => null),
           apiGet('/api/v1/workspace/feeds').catch(() => null),
           apiGet('/api/v1/workspace/delegations').catch(() => null),
@@ -255,6 +261,7 @@ export default function MyWorkspaceView({
           apiGet('/api/v1/departments').catch(() => null),
           apiGet('/api/v1/locations').catch(() => null),
           apiGet('/api/v1/governance/policies/acknowledgements').catch(() => []),
+          apiGet('/api/v1/onboarding-tasks/mine').catch(() => []),
         ]);
         if (attRes) {
           setCheckedIn(Boolean(attRes.checkedIn));
@@ -313,6 +320,8 @@ export default function MyWorkspaceView({
         const locsList = unwrapList(locsRes);
         if (locsList.length > 0) setOrgLocations(locsList);
         const ackList = unwrapList(acksRes);
+        if (Array.isArray(ackList)) setPolicyAcks(ackList);
+        setMyOnboardingTasks(unwrapList(onbRes));
         if (ackList.length > 0) setPolicyAcks(ackList);
       } catch {
         // ignore load errors on restricted views
@@ -1380,6 +1389,88 @@ export default function MyWorkspaceView({
                       <p className="text-slate-400 py-2">Write a short introduction about yourself</p>
                     </div>
 
+                    {/* My Assigned Onboarding Checklist */}
+                    {myOnboardingTasks.length > 0 && (
+                      <div className="bg-white rounded-md border border-slate-200 p-5 text-xs space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h4 className="font-semibold text-slate-800">My Onboarding Checklist</h4>
+                            <p className="text-[11px] text-slate-500">
+                              Tasks assigned directly to you or your role during onboarding
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={refreshMyOnboardingTasks}
+                            className="text-[11px] text-[#0088ff] hover:underline font-medium"
+                          >
+                            Refresh
+                          </button>
+                        </div>
+                        <div className="space-y-2">
+                          {myOnboardingTasks.map((task) => (
+                            <div
+                              key={task.id}
+                              className="p-3 border border-slate-200 rounded flex items-center justify-between gap-3"
+                            >
+                              <div>
+                                <div className="font-medium text-slate-800">{task.taskTitle}</div>
+                                <div className="text-[11px] text-slate-500">
+                                  {task.employee ? `${task.employee.firstName} ${task.employee.lastName} (${task.employee.employeeNumber}) • ` : ''}
+                                  Owner: {task.ownerType} • Status: <b>{task.status}</b>
+                                  {task.dueDate ? ` • Due: ${String(task.dueDate).slice(0, 10)}` : ''}
+                                </div>
+                              </div>
+                              {task.status !== 'COMPLETED' && task.status !== 'WAIVED' && !task.evidenceRequired && (
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {task.status === 'PENDING' && (
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        try {
+                                          await apiPatch(`/api/v1/onboarding-tasks/${task.id}`, {
+                                            status: 'IN_PROGRESS',
+                                            completionNotes: 'Started in My Space',
+                                          });
+                                          notify(`Started task: ${task.taskTitle}`);
+                                          await refreshMyOnboardingTasks();
+                                          onRefreshAll && onRefreshAll();
+                                        } catch (err) {
+                                          notify(err?.message || 'Unable to start task', 'error');
+                                        }
+                                      }}
+                                      className="px-2.5 py-1 border border-blue-300 text-[#0088ff] rounded text-[11px] font-medium"
+                                    >
+                                      Start
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      try {
+                                        await apiPatch(`/api/v1/onboarding-tasks/${task.id}`, {
+                                          status: 'COMPLETED',
+                                          completionNotes: 'Completed in My Space self-service checklist',
+                                        });
+                                        notify(`Completed task: ${task.taskTitle}`);
+                                        await refreshMyOnboardingTasks();
+                                        onRefreshAll && onRefreshAll();
+                                      } catch (err) {
+                                        notify(err?.message || 'Unable to complete task', 'error');
+                                      }
+                                    }}
+                                    className="px-2.5 py-1 bg-emerald-600 text-white rounded text-[11px] font-medium"
+                                  >
+                                    Complete
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Basic Information */}
                     <div className="bg-white rounded-md border border-slate-200 p-5 text-xs">
                       <div className="flex items-center justify-between mb-4">
@@ -1529,7 +1620,16 @@ export default function MyWorkspaceView({
                         <div className="flex sm:gap-12">
                           <span className="text-slate-500 w-36">Onboarding Status</span>
                           <span className="font-medium text-slate-800">
-                            {currentEmp.onboardingStatus || 'Active'}
+                            {currentEmp.onboardingCompletedAt
+                              ? 'Completed'
+                              : currentEmp.status === 'PROBATION' ||
+                                  (currentEmp.onboardingTasks || []).some(
+                                    (t) => t.status === 'IN_PROGRESS' || t.status === 'COMPLETED' || t.status === 'WAIVED',
+                                  )
+                                ? 'In Progress'
+                                : currentEmp.status === 'ONBOARDING'
+                                  ? 'Triggered'
+                                  : currentEmp.onboardingStatus || 'Completed'}
                           </span>
                         </div>
                       </div>
@@ -2171,14 +2271,64 @@ export default function MyWorkspaceView({
             )}
 
             {/* 9. My Pending Tasks */}
-            {isWidgetEnabled('pendingtasks') && (
-              <div className="bg-white rounded-md border border-slate-200 p-4 min-h-[170px] flex flex-col">
-                <h4 className="text-xs font-semibold text-slate-800">My Pending Tasks</h4>
-                <div className="flex-1 flex items-center justify-center text-xs text-slate-400">
-                  {tasks.length === 0 ? 'There are no tasks available' : `${tasks.length} pending task(s)`}
+            {isWidgetEnabled('pendingtasks') && (() => {
+              const openOnboarding = myOnboardingTasks.filter(
+                (t) => t.status === 'PENDING' || t.status === 'IN_PROGRESS',
+              );
+              const totalOpen = tasks.length + openOnboarding.length;
+              return (
+                <div className="bg-white rounded-md border border-slate-200 p-4 min-h-[170px] flex flex-col">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-xs font-semibold text-slate-800">My Pending Tasks</h4>
+                    {totalOpen > 0 && (
+                      <span className="text-[11px] font-medium text-[#0088ff]">{totalOpen} open</span>
+                    )}
+                  </div>
+                  {totalOpen === 0 ? (
+                    <div className="flex-1 flex items-center justify-center text-xs text-slate-400">
+                      There are no tasks available
+                    </div>
+                  ) : (
+                    <div className="space-y-2 text-xs">
+                      {openOnboarding.slice(0, 4).map((t) => (
+                        <div key={t.id} className="p-2 border border-slate-100 rounded bg-slate-50 flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-medium text-slate-800 truncate">{t.taskTitle}</p>
+                            <p className="text-[11px] text-slate-500">
+                              {t.employee ? `${t.employee.firstName} ${t.employee.lastName} • ` : ''}{t.status}
+                            </p>
+                          </div>
+                          {!t.evidenceRequired && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await apiPatch(`/api/v1/onboarding-tasks/${t.id}`, {
+                                    status: 'COMPLETED',
+                                    completionNotes: 'Completed from My Pending Tasks widget',
+                                  });
+                                  notify(`Completed: ${t.taskTitle}`);
+                                  await refreshMyOnboardingTasks();
+                                  onRefreshAll && onRefreshAll();
+                                } catch (err) {
+                                  notify(err?.message || 'Unable to complete task', 'error');
+                                }
+                              }}
+                              className="px-2 py-1 bg-emerald-600 text-white rounded text-[11px] shrink-0"
+                            >
+                              Complete
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      {tasks.length > 0 && (
+                        <p className="text-[11px] text-slate-500">{tasks.length} workflow approval task(s) pending</p>
+                      )}
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* 10. My Files (06:08 of hr.webm) */}
             {isWidgetEnabled('myfiles') && (

@@ -51,6 +51,13 @@ describe('Employee Master, Organisation Hierarchy & Employee Lifecycle (EMP-01..
       await prisma.employee.deleteMany({ where: { id: { in: ids } } });
     }
     await prisma.employmentCategory.deleteMany({ where: { code: { in: ['SPECIALIST_CONSULTANT', 'UNAPPROVED_TIER'] } } });
+    const e2eUsers = await prisma.user.findMany({ where: { email: 'mwangi.e2e@ndakalaadvisory.co.ke' }, select: { id: true } });
+    const e2eUserIds = e2eUsers.map((u) => u.id);
+    if (e2eUserIds.length > 0) {
+      await prisma.session.deleteMany({ where: { userId: { in: e2eUserIds } } });
+      await prisma.userRoleAssignment.deleteMany({ where: { userId: { in: e2eUserIds } } });
+      await prisma.user.deleteMany({ where: { id: { in: e2eUserIds } } });
+    }
   }
 
   beforeAll(async () => {
@@ -684,5 +691,143 @@ describe('Employee Master, Organisation Hierarchy & Employee Lifecycle (EMP-01..
       where: { exceptionType: 'EXPIRING_SOON', status: 'OPEN' },
     });
     expect(exc).toBeDefined();
+  });
+
+  // -------------------------------------------------------------------------
+  // 11. Full Multi-Role Onboarding E2E: Auto User Link, Mine Tasks, ICT Sync & List Fields
+  // -------------------------------------------------------------------------
+  it('completes end-to-end multi-role onboarding with workEmail user auto-linking and ICT ticket sync', async () => {
+    const manager = await prisma.employee.findUniqueOrThrow({
+      where: { workEmail: 'line.manager@ndakalaadvisory.co.ke' },
+    });
+
+    // Ensure STD-JOINER-DRAFT template is active
+    const tpl = await prisma.onboardingTemplate.findUnique({ where: { code: 'STD-JOINER-DRAFT' } });
+    if (tpl && tpl.status !== 'ACTIVE') {
+      await prisma.onboardingTemplate.update({ where: { id: tpl.id }, data: { status: 'ACTIVE' } });
+    }
+
+    // 1. ICT Admin provisions new portal user & assigns employee role
+    const joinerEmail = 'mwangi.e2e@ndakalaadvisory.co.ke';
+    const userRes = await ictClient.agent
+      .post('/api/v1/users')
+      .set('x-csrf-token', ictClient.csrfToken)
+      .send({
+        email: joinerEmail,
+        name: 'E2E Joiner Mwangi',
+        password: 'Joiner@2026!Secure',
+      });
+    expect(userRes.status).toBe(200);
+    const createdUserId = userRes.body.data.id;
+
+    const roleRes = await ictClient.agent
+      .post(`/api/v1/users/${createdUserId}/roles`)
+      .set('x-csrf-token', ictClient.csrfToken)
+      .send({ roleKey: 'employee' });
+    expect(roleRes.status).toBe(200);
+
+    // 2. HR creates Employee WITHOUT explicit userId — backend auto-links by workEmail
+    const createEmpRes = await hrClient.agent
+      .post('/api/v1/employees')
+      .set('x-csrf-token', hrClient.csrfToken)
+      .send({
+        firstName: 'Mwangi',
+        lastName: 'E2E',
+        workEmail: joinerEmail,
+        phoneNumber: '+254712345699',
+        employmentCategoryCode: 'PERMANENT',
+        startDate: '2026-11-01',
+        jobTitle: 'Advisory Associate',
+        departmentId: deptAdvId,
+        managerId: manager.id,
+        ictAccessProfile: 'STANDARD_OFFICE_365',
+      });
+    expect(createEmpRes.status).toBe(201);
+    const e2eEmpId = createEmpRes.body.data.employee.id;
+    expect(createEmpRes.body.data.employee.userId).toBe(createdUserId);
+
+    // Verify GET /employees returns onboardingCompletedAt and onboardingTasks
+    const listRes = await hrClient.agent.get(`/api/v1/employees?search=${encodeURIComponent(joinerEmail)}`);
+    expect(listRes.status).toBe(200);
+    const listed = listRes.body.data.items.find((e: any) => e.id === e2eEmpId);
+    expect(listed).toBeDefined();
+    expect(listed.onboardingCompletedAt).toBeNull();
+    expect(Array.isArray(listed.onboardingTasks)).toBe(true);
+    expect(listed.onboardingTasks.length).toBeGreaterThanOrEqual(5);
+
+    // 3. New Joiner logs in, checks /onboarding-tasks/mine, starts & completes their EMPLOYEE task
+    const joinerClient = await loginClient(app, joinerEmail, 'Joiner@2026!Secure');
+    const joinerMineRes = await joinerClient.agent.get('/api/v1/onboarding-tasks/mine');
+    expect(joinerMineRes.status).toBe(200);
+    const empTask = joinerMineRes.body.data.find(
+      (t: any) => t.employeeId === e2eEmpId && t.ownerType === 'EMPLOYEE',
+    );
+    expect(empTask).toBeDefined();
+
+    const startRes = await joinerClient.agent
+      .patch(`/api/v1/onboarding-tasks/${empTask.id}`)
+      .set('x-csrf-token', joinerClient.csrfToken)
+      .send({ status: 'IN_PROGRESS' });
+    expect(startRes.status).toBe(200);
+
+    const completeJoinerTaskRes = await joinerClient.agent
+      .patch(`/api/v1/onboarding-tasks/${empTask.id}`)
+      .set('x-csrf-token', joinerClient.csrfToken)
+      .send({ status: 'COMPLETED', completionNotes: 'Verified details in My Space' });
+    expect(completeJoinerTaskRes.status).toBe(200);
+
+    // 4. Line Manager checks /onboarding-tasks/mine and completes MANAGER task
+    const mgrMineRes = await managerClient.agent.get('/api/v1/onboarding-tasks/mine');
+    expect(mgrMineRes.status).toBe(200);
+    const mgrTask = mgrMineRes.body.data.find(
+      (t: any) => t.employeeId === e2eEmpId && t.ownerType === 'MANAGER',
+    );
+    expect(mgrTask).toBeDefined();
+    const mgrCompleteRes = await managerClient.agent
+      .patch(`/api/v1/onboarding-tasks/${mgrTask.id}`)
+      .set('x-csrf-token', managerClient.csrfToken)
+      .send({ status: 'COMPLETED', completionNotes: 'Objectives agreed with hire' });
+    expect(mgrCompleteRes.status).toBe(200);
+
+    // 5. HR uploads evidence document and completes all HR tasks
+    const hrTasks = await prisma.onboardingTask.findMany({
+      where: { employeeId: e2eEmpId, ownerType: 'HR' },
+    });
+    for (const hTask of hrTasks) {
+      let evidenceDocumentId: string | undefined;
+      if (hTask.evidenceRequired) {
+        const upRes = await hrClient.agent
+          .post('/api/v1/documents/upload')
+          .set('x-csrf-token', hrClient.csrfToken)
+          .send({
+            fileName: `${hTask.taskTitle.slice(0, 15).replace(/\s+/g, '_')}.pdf`,
+            mimeType: 'application/pdf',
+            category: 'COMPLIANCE',
+            securityClassification: 'CONFIDENTIAL',
+            fileBase64: Buffer.from('Signed onboarding evidence PDF').toString('base64'),
+          });
+        expect(upRes.status).toBe(200);
+        evidenceDocumentId = upRes.body.data.id;
+      }
+      const hrCompRes = await hrClient.agent
+        .patch(`/api/v1/onboarding-tasks/${hTask.id}`)
+        .set('x-csrf-token', hrClient.csrfToken)
+        .send({ status: 'COMPLETED', completionNotes: 'HR verified', ...(evidenceDocumentId ? { evidenceDocumentId } : {}) });
+      expect(hrCompRes.status).toBe(200);
+    }
+
+    // 6. ICT Admin fulfils the JOINER ICT ticket -> ICT task auto-completes and onboardingCompletedAt is stamped!
+    const ictTicketId = createEmpRes.body.data.ictRequestId;
+    const ictFulfilRes = await ictClient.agent
+      .patch(`/api/v1/ict-requests/${ictTicketId}`)
+      .set('x-csrf-token', ictClient.csrfToken)
+      .send({ status: 'COMPLETED', completionNotes: 'M365 and portal access verified' });
+    expect(ictFulfilRes.status).toBe(200);
+    expect(ictFulfilRes.body.data.syncedOnboardingTasks).toBeGreaterThanOrEqual(1);
+
+    const listAfterRes = await hrClient.agent.get(`/api/v1/employees?search=${encodeURIComponent(joinerEmail)}`);
+    expect(listAfterRes.status).toBe(200);
+    const listedAfter = listAfterRes.body.data.items.find((e: any) => e.id === e2eEmpId);
+    expect(listedAfter.onboardingCompletedAt).not.toBeNull();
   });
 });

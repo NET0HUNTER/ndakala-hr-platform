@@ -154,6 +154,8 @@ const createDefaultCandidateForm = () => ({
   positionId: '',
   gradeId: '',
   locationId: '',
+  managerId: '',
+  ictAccessProfile: 'STANDARD_OFFICE_365',
   employmentCategoryCode: 'PERMANENT',
 });
 
@@ -379,6 +381,17 @@ export default function WorkforceDirectoryView({
     newStatus: 'ACTIVE',
   });
   const [docUploadForm, setDocUploadForm] = useState({ documentType: 'CONTRACT', visibility: 'HR_AND_EMPLOYEE', notes: '' });
+  const [taskEvidenceMap, setTaskEvidenceMap] = useState({});
+  const [taskWaiverReasons, setTaskWaiverReasons] = useState({});
+  const [uploadingTaskId, setUploadingTaskId] = useState(null);
+  const [portalUsers, setPortalUsers] = useState([]);
+  const [portalUserForm, setPortalUserForm] = useState({
+    name: '',
+    email: '',
+    password: '',
+    roleKey: 'employee',
+  });
+  const [creatingPortalUser, setCreatingPortalUser] = useState(false);
 
   // Forms for ICT, Requisitions, Transfers, Separations, Setup
   const [reqForm, setReqForm] = useState({
@@ -611,8 +624,12 @@ export default function WorkforceDirectoryView({
 
   const loadOperationsTabData = async (mode) => {
     if (mode === 'ict') {
-      const list = await apiGet('/api/v1/ict-requests').catch(() => []);
+      const [list, usersList] = await Promise.all([
+        apiGet('/api/v1/ict-requests').catch(() => []),
+        apiGet('/api/v1/users').catch(() => []),
+      ]);
       setIctRequests(unwrapList(list));
+      setPortalUsers(unwrapList(usersList));
     } else if (mode === 'requisitions') {
       const [reqs, met] = await Promise.all([
         apiGet('/api/v1/workforce/requisitions').catch(() => []),
@@ -648,8 +665,13 @@ export default function WorkforceDirectoryView({
       setDirSubMode('requisitions');
     } else if (subViewHint === 'ict') {
       setDirSubMode('ict');
+    } else if (
+      currentUser?.permissions?.includes('ict.access.fulfil') &&
+      !currentUser?.permissions?.includes('employees.view')
+    ) {
+      setDirSubMode('ict');
     }
-  }, [subViewHint]);
+  }, [subViewHint, currentUser?.id]);
 
   useEffect(() => {
     if (topContextTab === 'probation') {
@@ -674,15 +696,33 @@ export default function WorkforceDirectoryView({
     return () => document.removeEventListener('mousedown', handleOutside);
   }, []);
 
-  const openEmployeeDrawer = async (row) => {
+  const openEmployeeDrawer = async (row, preserveTab = false) => {
     setSelectedRecord(row);
-    setDrawerTab('overview');
+    if (!preserveTab) setDrawerTab('overview');
     setDetailEmployee(null);
     if (!row.rawEmployee) return;
     setDetailLoading(true);
     try {
       const full = await apiGet(`/api/v1/employees/${row.id}`);
       setDetailEmployee(full);
+      const latestProb = full?.probationRecords?.[0];
+      if (latestProb?.objectives) {
+        try {
+          const parsedObj = typeof latestProb.objectives === 'string'
+            ? JSON.parse(latestProb.objectives)
+            : latestProb.objectives;
+          if (Array.isArray(parsedObj) && parsedObj[0]) {
+            setObjInput((prev) => ({
+              ...prev,
+              objective: parsedObj[0].objective || prev.objective,
+              expectedOutput: parsedObj[0].expectedOutput || prev.expectedOutput,
+              supportRequired: latestProb.supportRequired || prev.supportRequired,
+            }));
+          }
+        } catch {
+          // keep current input state
+        }
+      }
     } catch {
       // ignore
     } finally {
@@ -690,10 +730,41 @@ export default function WorkforceDirectoryView({
     }
   };
 
+  const uploadAndAttachEmployeeDocument = async (
+    employeeId,
+    file,
+    { documentType = 'ONBOARDING_EVIDENCE', visibility = 'HR_AND_EMPLOYEE', notes } = {},
+  ) => {
+    const fileBase64 = await readFileAsBase64(file);
+    const uploaded = await apiPost('/api/v1/documents/upload', {
+      fileName: file.name,
+      mimeType: file.type || 'application/pdf',
+      category: 'COMPLIANCE',
+      securityClassification: visibility === 'HR_ONLY' || visibility === 'CONFIDENTIAL' ? 'CONFIDENTIAL' : 'INTERNAL',
+      fileBase64,
+    });
+    const attached = await apiPost(`/api/v1/employees/${employeeId}/documents`, {
+      documentRecordId: uploaded.id,
+      documentType,
+      visibility,
+      notes: notes || file.name,
+    });
+    return { uploaded, attached };
+  };
+
   // Map live backend employees exclusively
   const mappedBackendRows = employees.map((emp) => {
     const first = emp.firstName || (emp.fullName || 'Employee').split(' ')[0];
     const last = emp.lastName || (emp.fullName || '').split(' ').slice(1).join(' ') || '-';
+    const taskList = Array.isArray(emp.onboardingTasks) ? emp.onboardingTasks : [];
+    const hasStartedTask = taskList.some(
+      (t) => t.status === 'IN_PROGRESS' || t.status === 'COMPLETED' || t.status === 'WAIVED',
+    );
+    const onboardingStatus = emp.onboardingCompletedAt
+      ? 'Completed'
+      : emp.status === 'PROBATION' || hasStartedTask
+        ? 'In Progress'
+        : 'Triggered';
     return {
       id: emp.id,
       employeeNumber: emp.employeeNumber || '',
@@ -701,7 +772,7 @@ export default function WorkforceDirectoryView({
       lastName: last,
       email: emp.workEmail || emp.email || emp.personalEmail || '',
       officialEmail: emp.workEmail || emp.email || '',
-      onboardingStatus: emp.onboardingCompletedAt ? 'Completed' : emp.status === 'PROBATION' ? 'In Progress' : 'Triggered',
+      onboardingStatus,
       department: emp.department?.name || emp.department || 'Management',
       sourceOfHire: 'Direct',
       gender: emp.gender || 'Male',
@@ -732,7 +803,7 @@ export default function WorkforceDirectoryView({
       'Last name': r.lastName,
       'Email ID': r.email,
       'Official Email': r.officialEmail,
-      'Onboarding Status': r.status,
+      'Onboarding Status': r.onboardingStatus,
       Department: r.department,
       'Source of Hire': r.sourceOfHire,
       Gender: r.gender,
@@ -849,6 +920,8 @@ export default function WorkforceDirectoryView({
           ...(candidateForm.positionId ? { positionId: candidateForm.positionId } : {}),
           ...(candidateForm.gradeId ? { gradeId: candidateForm.gradeId } : {}),
           ...(candidateForm.locationId ? { locationId: candidateForm.locationId } : {}),
+          ...(candidateForm.managerId ? { managerId: candidateForm.managerId } : {}),
+          ...(candidateForm.ictAccessProfile ? { ictAccessProfile: candidateForm.ictAccessProfile } : {}),
         });
         if (createdOk === false) return;
       }
@@ -1205,7 +1278,7 @@ export default function WorkforceDirectoryView({
           </button>
 
           {/* Workforce Operations Mode Pills */}
-          <div className="hidden xl:flex items-center gap-1 ml-2 pl-3 border-l border-slate-200">
+          <div className="flex flex-wrap items-center gap-1 ml-2 pl-3 border-l border-slate-200">
             {[
               { id: 'records', label: 'Records' },
               { id: 'ict', label: 'ICT Provisioning' },
@@ -1530,16 +1603,16 @@ export default function WorkforceDirectoryView({
         })() : (
         <div className="flex-1 bg-white rounded-md border border-slate-200 shadow-2xs overflow-y-auto p-5 space-y-5 text-xs">
           {dirSubMode === 'ict' && (
-            <div className="space-y-4">
+            <div className="space-y-5">
               <div className="flex items-center justify-between border-b border-slate-200 pb-3">
                 <div>
                   <h3 className="text-sm font-semibold text-slate-800">ICT Joiner & Leaver Access Provisioning</h3>
-                  <p className="text-slate-500">Fulfil Microsoft 365, VPN, and endpoint deactivation tickets generated by employee lifecycle events.</p>
+                  <p className="text-slate-500">Fulfil Microsoft 365, VPN, portal account, and endpoint tickets generated by employee lifecycle events.</p>
                 </div>
                 <button type="button" onClick={() => loadOperationsTabData('ict')} className="px-3 py-1.5 border border-slate-300 rounded hover:bg-slate-50">Refresh</button>
               </div>
               {ictRequests.length === 0 ? (
-                <p className="text-slate-500 py-8 text-center">No ICT provisioning requests queued.</p>
+                <p className="text-slate-500 py-6 text-center">No ICT provisioning requests queued.</p>
               ) : (
                 <table className="w-full text-left border-collapse">
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
@@ -1561,6 +1634,26 @@ export default function WorkforceDirectoryView({
                         <td className="py-2.5 px-3 font-mono text-[11px]">{req.accessProfile}</td>
                         <td className="py-2.5 px-3">{req.status}</td>
                         <td className="py-2.5 px-3 text-right space-x-1.5">
+                          {req.status === 'PENDING' && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await apiPatch(`/api/v1/ict-requests/${req.id}`, {
+                                    status: 'IN_PROGRESS',
+                                    completionNotes: 'Provisioning started by ICT Administrator',
+                                  });
+                                  notify('ICT ticket marked In Progress.');
+                                  loadOperationsTabData('ict');
+                                } catch (err) {
+                                  notify(err?.message || 'Unable to update ICT ticket', 'error');
+                                }
+                              }}
+                              className="px-2.5 py-1 border border-slate-300 text-slate-700 rounded text-[11px] font-medium"
+                            >
+                              Start
+                            </button>
+                          )}
                           {req.status !== 'COMPLETED' && (
                             <button
                               type="button"
@@ -1572,6 +1665,7 @@ export default function WorkforceDirectoryView({
                                   });
                                   notify('ICT ticket marked completed.');
                                   loadOperationsTabData('ict');
+                                  onRefreshAll && onRefreshAll();
                                 } catch (err) {
                                   notify(err?.message || 'Unable to update ICT ticket', 'error');
                                 }
@@ -1586,6 +1680,97 @@ export default function WorkforceDirectoryView({
                     ))}
                   </tbody>
                 </table>
+              )}
+
+              {currentUser?.permissions?.includes('users.manage') && (
+                <div className="p-4 border border-slate-200 rounded bg-slate-50/70 space-y-3">
+                  <div>
+                    <h4 className="font-semibold text-slate-800">Portal Login Provisioning (New Joiner User Account)</h4>
+                    <p className="text-[11px] text-slate-500">
+                      Create an authenticated Ndakala People login matching the hire&apos;s work email so employee onboarding tasks and self-service link automatically.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                    <input
+                      type="text"
+                      placeholder="Full Name (e.g. Amina Ochieng)"
+                      value={portalUserForm.name}
+                      onChange={(e) => setPortalUserForm({ ...portalUserForm, name: e.target.value })}
+                      className="px-2.5 py-1.5 border border-slate-300 rounded bg-white"
+                    />
+                    <input
+                      type="email"
+                      placeholder="Work Email"
+                      value={portalUserForm.email}
+                      onChange={(e) => setPortalUserForm({ ...portalUserForm, email: e.target.value })}
+                      className="px-2.5 py-1.5 border border-slate-300 rounded bg-white"
+                    />
+                    <input
+                      type="password"
+                      placeholder="Initial Password (min 8, A-Z, a-z, 0-9, symbol)"
+                      value={portalUserForm.password}
+                      onChange={(e) => setPortalUserForm({ ...portalUserForm, password: e.target.value })}
+                      className="px-2.5 py-1.5 border border-slate-300 rounded bg-white"
+                    />
+                    <div className="flex gap-2">
+                      {currentUser?.permissions?.includes('roles.manage') && (
+                        <select
+                          value={portalUserForm.roleKey}
+                          onChange={(e) => setPortalUserForm({ ...portalUserForm, roleKey: e.target.value })}
+                          className="flex-1 px-2.5 py-1.5 border border-slate-300 rounded bg-white"
+                        >
+                          <option value="employee">employee</option>
+                          <option value="line_manager">line_manager</option>
+                          <option value="head_of_hr">head_of_hr</option>
+                          <option value="ict_admin">ict_admin</option>
+                        </select>
+                      )}
+                      <button
+                        type="button"
+                        disabled={creatingPortalUser}
+                        onClick={async () => {
+                          if (!portalUserForm.name.trim() || !portalUserForm.email.trim() || !portalUserForm.password) {
+                            notify('Name, email, and initial password are required.', 'error');
+                            return;
+                          }
+                          setCreatingPortalUser(true);
+                          try {
+                            const created = await apiPost('/api/v1/users', {
+                              name: portalUserForm.name.trim(),
+                              email: portalUserForm.email.trim().toLowerCase(),
+                              password: portalUserForm.password,
+                            });
+                            if (created?.id && currentUser?.permissions?.includes('roles.manage')) {
+                              await apiPost(`/api/v1/users/${created.id}/roles`, {
+                                roleKey: portalUserForm.roleKey || 'employee',
+                              });
+                            }
+                            notify(`Portal user provisioned for ${created.email} (${portalUserForm.roleKey}).`);
+                            setPortalUserForm({ name: '', email: '', password: '', roleKey: 'employee' });
+                            loadOperationsTabData('ict');
+                          } catch (err) {
+                            notify(err?.message || 'Failed to provision portal user', 'error');
+                          } finally {
+                            setCreatingPortalUser(false);
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-[#0088ff] text-white rounded font-medium disabled:opacity-60"
+                      >
+                        {creatingPortalUser ? 'Creating...' : 'Create User'}
+                      </button>
+                    </div>
+                  </div>
+                  {portalUsers.length > 0 && (
+                    <div className="text-[11px] text-slate-600 pt-1">
+                      <span className="font-semibold text-slate-700">Provisioned Accounts ({portalUsers.length}): </span>
+                      {portalUsers.slice(0, 12).map((u) => (
+                        <span key={u.id} className="inline-block mr-2 mb-1 px-2 py-0.5 bg-white border border-slate-200 rounded">
+                          {u.email} ({u.roleAssignments?.map((ra) => ra.role?.key).filter(Boolean).join(', ') || 'no role'})
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -3030,6 +3215,34 @@ export default function WorkforceDirectoryView({
                     </select>
                   </div>
                   <div>
+                    <label className="block text-slate-600 font-medium mb-1">Reporting Manager</label>
+                    <select
+                      value={candidateForm.managerId}
+                      onChange={(e) => setCandidateForm({ ...candidateForm, managerId: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-300 rounded bg-white"
+                    >
+                      <option value="">No Reporting Manager</option>
+                      {employees.map((emp) => (
+                        <option key={emp.id} value={emp.id}>
+                          {emp.firstName} {emp.lastName} ({emp.employeeNumber || emp.workEmail})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-slate-600 font-medium mb-1">ICT Access Profile</label>
+                    <select
+                      value={candidateForm.ictAccessProfile}
+                      onChange={(e) => setCandidateForm({ ...candidateForm, ictAccessProfile: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-300 rounded bg-white"
+                    >
+                      <option value="STANDARD_OFFICE_365">STANDARD_OFFICE_365</option>
+                      <option value="FINANCE_RESTRICTED">FINANCE_RESTRICTED</option>
+                      <option value="PARTNER_FULL">PARTNER_FULL</option>
+                      <option value="INTERN_LIMITED">INTERN_LIMITED</option>
+                    </select>
+                  </div>
+                  <div>
                     <label className="block text-slate-600 font-medium mb-1">Start Date</label>
                     <input
                       type="date"
@@ -3216,60 +3429,157 @@ export default function WorkforceDirectoryView({
 
               {selectedRecord.rawEmployee && drawerTab === 'onboarding' && (
                 <div className="space-y-3">
-                  <h4 className="font-semibold text-slate-800">Assigned Onboarding Checklist</h4>
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-semibold text-slate-800">Assigned Onboarding Checklist</h4>
+                    <span className="text-[11px] font-medium text-slate-500">
+                      Status: <b className="text-slate-800">{detailEmployee?.onboardingCompletedAt ? 'Completed' : (detailEmployee?.onboardingTasks || []).some((t) => t.status !== 'PENDING') ? 'In Progress' : 'Triggered'}</b>
+                    </span>
+                  </div>
                   {(detailEmployee?.onboardingTasks || []).length === 0 ? (
                     <p className="text-slate-500">No onboarding tasks assigned.</p>
                   ) : (
-                    (detailEmployee?.onboardingTasks || []).map((task) => (
-                      <div key={task.id} className="p-3 border border-slate-200 rounded flex items-center justify-between gap-3">
-                        <div>
-                          <div className="font-medium text-slate-800">{task.taskTitle}</div>
-                          <div className="text-[11px] text-slate-500">
-                            Owner: {task.ownerType} • Status: {task.status}
+                    (detailEmployee?.onboardingTasks || []).map((task) => {
+                      const docs = detailEmployee?.documents || [];
+                      const chosenEvidenceId = taskEvidenceMap[task.id] || '';
+                      const waiverText = taskWaiverReasons[task.id] || '';
+                      return (
+                        <div key={task.id} className="p-3 border border-slate-200 rounded space-y-2">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="font-medium text-slate-800 flex items-center gap-2 flex-wrap">
+                                <span>{task.taskTitle}</span>
+                                {task.evidenceRequired && (
+                                  <span className="px-1.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded text-[10px]">
+                                    Evidence Required
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-slate-500 mt-0.5">
+                                Owner: {task.ownerType} • Status: <b>{task.status}</b>
+                                {task.dueDate ? ` • Due: ${String(task.dueDate).slice(0, 10)}` : ''}
+                                {task.evidenceDocumentId ? ' • Evidence Attached' : ''}
+                              </div>
+                            </div>
+                            {task.status !== 'COMPLETED' && task.status !== 'WAIVED' && (
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {task.status === 'PENDING' && (
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      try {
+                                        await apiPatch(`/api/v1/onboarding-tasks/${task.id}`, {
+                                          status: 'IN_PROGRESS',
+                                          completionNotes: 'Onboarding task started',
+                                        });
+                                        notify(`Started task: ${task.taskTitle}`);
+                                        await openEmployeeDrawer(selectedRecord, true);
+                                        onRefreshAll && onRefreshAll();
+                                      } catch (err) {
+                                        notify(err?.message || 'Unable to start task', 'error');
+                                      }
+                                    }}
+                                    className="px-2.5 py-1 border border-blue-300 text-[#0088ff] rounded text-[11px] font-medium"
+                                  >
+                                    Start
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    try {
+                                      await apiPatch(`/api/v1/onboarding-tasks/${task.id}`, {
+                                        status: 'COMPLETED',
+                                        completionNotes: 'Completed in Workforce Directory drawer',
+                                        ...(chosenEvidenceId ? { evidenceDocumentId: chosenEvidenceId } : {}),
+                                      });
+                                      notify(`Completed onboarding task: ${task.taskTitle}`);
+                                      await openEmployeeDrawer(selectedRecord, true);
+                                      onRefreshAll && onRefreshAll();
+                                    } catch (err) {
+                                      notify(err?.message || 'Unable to complete task', 'error');
+                                    }
+                                  }}
+                                  className="px-2.5 py-1 bg-emerald-600 text-white rounded text-[11px] font-medium"
+                                >
+                                  Complete
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    try {
+                                      await apiPatch(`/api/v1/onboarding-tasks/${task.id}`, {
+                                        status: 'WAIVED',
+                                        waiverReason: waiverText.trim() || 'Waived by HR Partner during onboarding verification',
+                                      });
+                                      notify(`Waived onboarding task: ${task.taskTitle}`);
+                                      await openEmployeeDrawer(selectedRecord, true);
+                                      onRefreshAll && onRefreshAll();
+                                    } catch (err) {
+                                      notify(err?.message || 'Unable to waive task', 'error');
+                                    }
+                                  }}
+                                  className="px-2.5 py-1 border border-slate-300 text-slate-600 rounded text-[11px] font-medium"
+                                >
+                                  Waive
+                                </button>
+                              </div>
+                            )}
                           </div>
+                          {task.status !== 'COMPLETED' && task.status !== 'WAIVED' && task.evidenceRequired && (
+                            <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-2 text-[11px]">
+                              <select
+                                aria-label={`Select evidence document for ${task.taskTitle}`}
+                                value={chosenEvidenceId}
+                                onChange={(e) =>
+                                  setTaskEvidenceMap((prev) => ({ ...prev, [task.id]: e.target.value }))
+                                }
+                                className="px-2 py-1 border border-slate-300 rounded bg-white max-w-[230px]"
+                              >
+                                <option value="">Select attached document as evidence...</option>
+                                {docs.map((doc) => (
+                                  <option key={doc.id} value={doc.documentRecordId}>
+                                    {doc.documentRecord?.fileName || doc.documentType} ({doc.documentType})
+                                  </option>
+                                ))}
+                              </select>
+                              <label className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded cursor-pointer font-medium text-slate-700">
+                                {uploadingTaskId === task.id ? 'Uploading...' : 'Upload Evidence & Complete'}
+                                <input
+                                  type="file"
+                                  className="hidden"
+                                  disabled={uploadingTaskId === task.id}
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    setUploadingTaskId(task.id);
+                                    try {
+                                      const { uploaded } = await uploadAndAttachEmployeeDocument(selectedRecord.id, file, {
+                                        documentType: 'ONBOARDING_EVIDENCE',
+                                        visibility: 'HR_AND_EMPLOYEE',
+                                        notes: `Evidence for ${task.taskTitle}`,
+                                      });
+                                      await apiPatch(`/api/v1/onboarding-tasks/${task.id}`, {
+                                        status: 'COMPLETED',
+                                        completionNotes: `Evidence uploaded: ${file.name}`,
+                                        evidenceDocumentId: uploaded.id,
+                                      });
+                                      notify(`Uploaded ${file.name} and completed ${task.taskTitle}`);
+                                      await openEmployeeDrawer(selectedRecord, true);
+                                      onRefreshAll && onRefreshAll();
+                                    } catch (err) {
+                                      notify(err?.message || 'Unable to upload evidence', 'error');
+                                    } finally {
+                                      setUploadingTaskId(null);
+                                      e.target.value = '';
+                                    }
+                                  }}
+                                />
+                              </label>
+                            </div>
+                          )}
                         </div>
-                        {task.status !== 'COMPLETED' && task.status !== 'WAIVED' && (
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  await apiPatch(`/api/v1/onboarding-tasks/${task.id}`, {
-                                    status: 'COMPLETED',
-                                    completionNotes: 'Completed in Workforce Directory drawer',
-                                  });
-                                  notify(`Completed onboarding task: ${task.taskTitle}`);
-                                  openEmployeeDrawer(selectedRecord);
-                                } catch (err) {
-                                  notify(err?.message || 'Unable to complete task', 'error');
-                                }
-                              }}
-                              className="px-2.5 py-1 bg-emerald-600 text-white rounded text-[11px] font-medium"
-                            >
-                              Complete
-                            </button>
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  await apiPatch(`/api/v1/onboarding-tasks/${task.id}`, {
-                                    status: 'WAIVED',
-                                    waiverReason: 'Waived by HR Partner during onboarding verification',
-                                  });
-                                  notify(`Waived onboarding task: ${task.taskTitle}`);
-                                  openEmployeeDrawer(selectedRecord);
-                                } catch (err) {
-                                  notify(err?.message || 'Unable to waive task', 'error');
-                                }
-                              }}
-                              className="px-2.5 py-1 border border-slate-300 text-slate-600 rounded text-[11px] font-medium"
-                            >
-                              Waive
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               )}
@@ -3314,7 +3624,8 @@ export default function WorkforceDirectoryView({
                               supportRequired: objInput.supportRequired || undefined,
                             });
                             notify('Probation objectives saved.');
-                            openEmployeeDrawer(selectedRecord);
+                            await openEmployeeDrawer(selectedRecord, true);
+                            onRefreshAll && onRefreshAll();
                           } catch (err) {
                             notify(err?.message || 'Failed to save objectives', 'error');
                           }
@@ -3383,7 +3694,8 @@ export default function WorkforceDirectoryView({
                               recommendationReason: evalForm.recommendationReason,
                             });
                             notify('Probation evaluation submitted.');
-                            openEmployeeDrawer(selectedRecord);
+                            await openEmployeeDrawer(selectedRecord, true);
+                            onRefreshAll && onRefreshAll();
                           } catch (err) {
                             notify(err?.message || 'Failed to evaluate probation', 'error');
                           }
@@ -3416,7 +3728,13 @@ export default function WorkforceDirectoryView({
                       </div>
                       <button
                         type="button"
-                        onClick={() => onConfirmProbation && onConfirmProbation(prob.id, decisionForm.decision)}
+                        onClick={async () => {
+                          if (!onConfirmProbation) return;
+                          const ok = await onConfirmProbation(prob.id, decisionForm.decision, decisionForm.decisionReason);
+                          if (ok !== false) {
+                            await openEmployeeDrawer(selectedRecord, true);
+                          }
+                        }}
                         className="px-3 py-1.5 bg-emerald-600 text-white rounded font-medium"
                       >
                         Record Final Decision
@@ -3507,7 +3825,8 @@ export default function WorkforceDirectoryView({
                                   comments: 'Approved in HR Directory',
                                 });
                                 notify('Change request approved.');
-                                openEmployeeDrawer(selectedRecord);
+                                await openEmployeeDrawer(selectedRecord, true);
+                                onRefreshAll && onRefreshAll();
                               } catch (err) {
                                 notify(err?.message || 'Review blocked', 'error');
                               }
@@ -3525,7 +3844,8 @@ export default function WorkforceDirectoryView({
                                   comments: 'Returned for revision',
                                 });
                                 notify('Change request rejected.');
-                                openEmployeeDrawer(selectedRecord);
+                                await openEmployeeDrawer(selectedRecord, true);
+                                onRefreshAll && onRefreshAll();
                               } catch (err) {
                                 notify(err?.message || 'Review blocked', 'error');
                               }
@@ -3551,7 +3871,7 @@ export default function WorkforceDirectoryView({
                         onChange={(e) => setDocUploadForm({ ...docUploadForm, documentType: e.target.value })}
                         className="px-2.5 py-1.5 border border-slate-300 rounded bg-white"
                       >
-                        {['CONTRACT', 'JOB_DESCRIPTION', 'ID_EVIDENCE', 'STATUTORY_FORM', 'QUALIFICATION', 'MEDICAL', 'PROBATION_FORM', 'OTHER'].map((t) => (
+                        {['CONTRACT', 'JOB_DESCRIPTION', 'ID_EVIDENCE', 'STATUTORY_FORM', 'QUALIFICATION', 'MEDICAL', 'PROBATION_FORM', 'ONBOARDING_EVIDENCE', 'OTHER'].map((t) => (
                           <option key={t} value={t}>{t}</option>
                         ))}
                       </select>
@@ -3561,19 +3881,18 @@ export default function WorkforceDirectoryView({
                           const file = e.target.files?.[0];
                           if (!file) return;
                           try {
-                            const fd = new FormData();
-                            fd.append('file', file);
-                            const uploaded = await apiRequest('/api/v1/documents/upload', { method: 'POST', body: fd });
-                            await apiPost(`/api/v1/employees/${selectedRecord.id}/documents`, {
-                              documentRecordId: uploaded.id,
+                            await uploadAndAttachEmployeeDocument(selectedRecord.id, file, {
                               documentType: docUploadForm.documentType,
                               visibility: docUploadForm.visibility,
                               notes: docUploadForm.notes || file.name,
                             });
                             notify(`Attached document: ${file.name}`);
-                            openEmployeeDrawer(selectedRecord);
+                            await openEmployeeDrawer(selectedRecord, true);
+                            onRefreshAll && onRefreshAll();
                           } catch (err) {
                             notify(err?.message || 'Document upload failed', 'error');
+                          } finally {
+                            e.target.value = '';
                           }
                         }}
                         className="text-[11px]"

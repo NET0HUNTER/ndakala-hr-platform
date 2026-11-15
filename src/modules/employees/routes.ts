@@ -484,7 +484,47 @@ export function createEmployeesRouter(deps: AppDeps): Router {
     },
   });
 
-  // 10. Update / Complete Onboarding Task
+  // 10. List My Assigned Onboarding Tasks + Update / Complete Onboarding Task
+  registerRoute(router, deps, {
+    method: 'get',
+    path: '/onboarding-tasks/mine',
+    auth: 'session',
+    handler: async ({ auth, deps }) => {
+      const emp = await deps.prisma.employee.findFirst({
+        where: { OR: [{ userId: auth.userId }, { workEmail: auth.email.toLowerCase() }] },
+        select: { id: true },
+      });
+
+      const orFilters: any[] = [{ assignedUserId: auth.userId }];
+      if (auth.roles.length > 0) {
+        orFilters.push({ assignedRoleKey: { in: auth.roles } });
+      }
+      if (emp) {
+        orFilters.push({ ownerType: 'EMPLOYEE', employeeId: emp.id });
+        orFilters.push({ ownerType: 'MANAGER', employee: { managerId: emp.id } });
+      }
+
+      return deps.prisma.onboardingTask.findMany({
+        where: { OR: orFilters },
+        include: {
+          employee: {
+            select: {
+              id: true,
+              employeeNumber: true,
+              firstName: true,
+              lastName: true,
+              workEmail: true,
+              status: true,
+              onboardingCompletedAt: true,
+              department: { select: { name: true } },
+            },
+          },
+        },
+        orderBy: [{ status: 'asc' }, { dueDate: 'asc' }, { createdAt: 'desc' }],
+      });
+    },
+  });
+
   registerRoute(router, deps, {
     method: 'patch',
     path: '/onboarding-tasks/:taskId',
@@ -499,16 +539,24 @@ export function createEmployeesRouter(deps: AppDeps): Router {
     handler: async ({ params, body, auth, req, deps }) => {
       const task = await deps.prisma.onboardingTask.findUnique({
         where: { id: params.taskId },
-        include: { employee: true },
+        include: {
+          employee: {
+            include: {
+              manager: { select: { userId: true } },
+            },
+          },
+        },
       });
       if (!task) throw notFound('OnboardingTask', params.taskId);
 
-      // Access checks: task owner or HR
+      // Access checks: task owner, employee/manager relationship, or HR
       const isHR = auth.permissions.has('onboarding.manage') || auth.permissions.has('employees.update');
       const isAssigned = task.assignedUserId === auth.userId;
       const isRoleAssigned = task.assignedRoleKey && auth.roles.includes(task.assignedRoleKey);
+      const isSelfEmployeeTask = task.ownerType === 'EMPLOYEE' && task.employee.userId === auth.userId;
+      const isLineManagerTask = task.ownerType === 'MANAGER' && task.employee.manager?.userId === auth.userId;
 
-      if (!isHR && !isAssigned && !isRoleAssigned) {
+      if (!isHR && !isAssigned && !isRoleAssigned && !isSelfEmployeeTask && !isLineManagerTask) {
         throw forbidden('Access denied: you are not assigned to complete this onboarding task');
       }
 
@@ -597,14 +645,65 @@ export function createEmployeesRouter(deps: AppDeps): Router {
       const ictReq = await deps.prisma.ictAccessRequest.findUnique({ where: { id: params.id } });
       if (!ictReq) throw notFound('IctAccessRequest', params.id);
 
-      const updated = await deps.prisma.ictAccessRequest.update({
-        where: { id: params.id },
-        data: {
-          status: body.status,
-          completionNotes: body.completionNotes,
-          completedById: body.status === 'COMPLETED' ? auth.userId : ictReq.completedById,
-          completedAt: body.status === 'COMPLETED' ? new Date() : ictReq.completedAt,
-        },
+      const now = new Date();
+      let syncedOnboardingTasks = 0;
+
+      const updated = await deps.prisma.$transaction(async (tx) => {
+        const reqUpdated = await tx.ictAccessRequest.update({
+          where: { id: params.id },
+          data: {
+            status: body.status,
+            completionNotes: body.completionNotes,
+            completedById: body.status === 'COMPLETED' ? auth.userId : ictReq.completedById,
+            completedAt: body.status === 'COMPLETED' ? now : ictReq.completedAt,
+          },
+        });
+
+        if (body.status === 'COMPLETED' && ictReq.requestType === 'JOINER') {
+          const openIctTasks = await tx.onboardingTask.findMany({
+            where: {
+              employeeId: ictReq.employeeId,
+              ownerType: 'ICT',
+              status: { in: ['PENDING', 'IN_PROGRESS'] },
+            },
+          });
+
+          for (const ictTask of openIctTasks) {
+            await tx.onboardingTask.update({
+              where: { id: ictTask.id },
+              data: {
+                status: 'COMPLETED',
+                completedAt: now,
+                completedById: auth.userId,
+                completionNotes: body.completionNotes,
+              },
+            });
+            syncedOnboardingTasks++;
+          }
+
+          if (openIctTasks.length > 0) {
+            const remaining = await tx.onboardingTask.count({
+              where: { employeeId: ictReq.employeeId, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+            });
+            if (remaining === 0) {
+              await tx.employee.update({
+                where: { id: ictReq.employeeId },
+                data: { onboardingCompletedAt: now, onboardingCompletedById: auth.userId },
+              });
+              await publishLifecycleEvent(tx, {
+                employeeId: ictReq.employeeId,
+                eventType: 'ONBOARDING_COMPLETED',
+                effectiveDate: now,
+                payload: { completedBy: auth.userId, trigger: 'ICT_REQUEST_COMPLETED' },
+                sourceType: 'IctAccessRequest',
+                sourceId: ictReq.id,
+                actorUserId: auth.userId,
+              });
+            }
+          }
+        }
+
+        return reqUpdated;
       });
 
       await writeAudit(deps.prisma, auditCtx(auth, req), {
@@ -612,10 +711,15 @@ export function createEmployeesRouter(deps: AppDeps): Router {
         targetType: 'IctAccessRequest',
         targetId: params.id,
         outcome: 'SUCCESS',
-        after: { requestType: ictReq.requestType, status: body.status, notes: body.completionNotes },
+        after: {
+          requestType: ictReq.requestType,
+          status: body.status,
+          notes: body.completionNotes,
+          syncedOnboardingTasks,
+        },
       });
 
-      return updated;
+      return { ...updated, syncedOnboardingTasks };
     },
   });
 
