@@ -604,16 +604,16 @@ export default function GovernanceView({
                             {ab.startDate?.slice(0, 10)} ({ab.contactChannel}) • Status: {ab.status}
                           </div>
                         </div>
-                        {ab.status === 'PENDING_REVIEW' && (
+                        {(ab.status === 'RECORDED' || ab.status === 'INVESTIGATION_REQUIRED') && (
                           <button
                             type="button"
                             onClick={async () => {
                               try {
                                 await apiPost(`/api/v1/absences/${ab.id}/review`, {
-                                  status: 'ACKNOWLEDGED',
-                                  notes: 'Reviewed by manager/HR',
+                                  status: 'EXCUSED',
+                                  notes: 'Reviewed & excused by manager/HR',
                                 });
-                                onShowToast && onShowToast('Absence acknowledged.');
+                                onShowToast && onShowToast('Absence reviewed and marked excused.');
                                 await loadAttendance();
                               } catch (err) {
                                 onShowToast && onShowToast(err?.message || 'Review failed', 'error');
@@ -621,7 +621,7 @@ export default function GovernanceView({
                             }}
                             className="px-2.5 py-1 bg-[#0088ff] text-white rounded text-[11px] font-medium"
                           >
-                            Acknowledge
+                            Excuse Absence
                           </button>
                         )}
                       </div>
@@ -2401,7 +2401,7 @@ export default function GovernanceView({
                   </div>
                   <button
                     type="button"
-                    onClick={() => setActiveTab && setActiveTab('leave', 'team')}
+                    onClick={() => setActiveTab && setActiveTab('inbox', 'team')}
                     className="text-[#0088ff] font-medium hover:underline"
                   >
                     Open Approvals →

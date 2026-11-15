@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { X, Calendar, Info } from '../../components/Icons';
-import { apiPost } from '../../utils/api';
+import { X, Calendar, Info, Upload, CheckCircle } from '../../components/Icons';
+import {
+  apiGet,
+  apiPost,
+  unwrapList,
+  computeLeaveBalanceStats,
+  readFileAsBase64,
+} from '../../utils/api';
 
 const DEFAULT_LEAVE_TYPES = [
   { code: 'ANNUAL', name: 'Annual Leave', defaultEntitlement: 21 },
@@ -62,11 +68,28 @@ export default function LeaveRequestModal({
   employees = [],
   currentEmployeeId,
   targetEmployeeId,
+  onShowToast,
 }) {
   const [calcPreview, setCalcPreview] = useState(null);
   const [teamEmail, setTeamEmail] = useState('');
+  const [leaveTypesList, setLeaveTypesList] = useState([]);
+  const [uploadingEvidence, setUploadingEvidence] = useState(false);
 
   const selectedCode = leaveForm.leaveTypeCode || 'ANNUAL';
+  const resolvedEmpId = targetEmployeeId || currentEmployeeId || employees[0]?.id;
+  const isSingleDay = Boolean(
+    leaveForm.startDate && leaveForm.endDate && leaveForm.startDate === leaveForm.endDate
+  );
+
+  useEffect(() => {
+    if (!isOpen) return;
+    apiGet('/api/v1/leave/types')
+      .then((res) => {
+        const list = unwrapList(res);
+        if (list.length > 0) setLeaveTypesList(list);
+      })
+      .catch(() => {});
+  }, [isOpen]);
 
   useEffect(() => {
     let active = true;
@@ -81,23 +104,34 @@ export default function LeaveRequestModal({
       }
       try {
         const preview = await apiPost('/api/v1/leave/calculate', {
-          employeeId: currentEmployeeId || undefined,
+          employeeId: resolvedEmpId || undefined,
           startDate: leaveForm.startDate,
           endDate: leaveForm.endDate,
           leaveTypeCode: selectedCode,
+          isHalfDay: Boolean(leaveForm.isHalfDay && isSingleDay),
+          halfDayType: leaveForm.isHalfDay && isSingleDay ? leaveForm.halfDayType || 'MORNING' : null,
         });
         if (active && preview) {
           setCalcPreview(preview);
         }
       } catch (_err) {
-        // Fallback local calculation
+        if (active) setCalcPreview(null);
       }
     }
     runPreview();
     return () => {
       active = false;
     };
-  }, [isOpen, leaveForm.startDate, leaveForm.endDate, selectedCode, currentEmployeeId]);
+  }, [
+    isOpen,
+    leaveForm.startDate,
+    leaveForm.endDate,
+    leaveForm.isHalfDay,
+    leaveForm.halfDayType,
+    selectedCode,
+    resolvedEmpId,
+    isSingleDay,
+  ]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -110,29 +144,70 @@ export default function LeaveRequestModal({
 
   if (!isOpen) return null;
 
+  const activeLeaveTypes =
+    leaveTypesList.length > 0
+      ? leaveTypesList
+      : DEFAULT_LEAVE_TYPES.map((t) => ({ ...t, allowHalfDay: true, requiresEvidence: false }));
+  const selectedLeaveType = activeLeaveTypes.find((t) => t.code === selectedCode) || null;
+
   const matchedBalance = leaveBalances.find(
-    (b) => (b.leaveType?.code || b.leaveTypeCode) === selectedCode
+    (b) =>
+      (b.leaveType?.code || b.leaveTypeCode) === selectedCode &&
+      (!resolvedEmpId || !b.employeeId || b.employeeId === resolvedEmpId)
   );
-  const availableDays =
-    matchedBalance && typeof matchedBalance.availableDays === 'number'
-      ? matchedBalance.availableDays
-      : DEFAULT_LEAVE_TYPES.find((t) => t.code === selectedCode)?.defaultEntitlement ?? 21;
+  const balStats = matchedBalance ? computeLeaveBalanceStats(matchedBalance) : null;
+  const availableDays = balStats
+    ? balStats.availableDays
+    : selectedLeaveType?.defaultEntitlementDays ??
+      selectedLeaveType?.defaultEntitlement ??
+      DEFAULT_LEAVE_TYPES.find((t) => t.code === selectedCode)?.defaultEntitlement ??
+      21;
 
   const chargeableDays = calcPreview?.chargeableDays ?? calcPreview?.netWorkingDays ?? 0;
   const requiresHandover = chargeableDays >= 5;
+  const requiresEvidence = Boolean(selectedLeaveType?.requiresEvidence);
 
-  const colleagues = employees.filter((e) => e.id !== currentEmployeeId);
-  const resolvedEmpId = targetEmployeeId || currentEmployeeId || employees[0]?.id;
-  const overlappingExisting = findOverlappingLeaveRequests(
-    leaveRequests,
-    resolvedEmpId,
-    leaveForm.startDate,
-    leaveForm.endDate
-  );
+  const colleagues = employees.filter((e) => e.id !== resolvedEmpId);
+  const overlappingExisting = leaveForm.editingRequestId
+    ? []
+    : findOverlappingLeaveRequests(
+        leaveRequests,
+        resolvedEmpId,
+        leaveForm.startDate,
+        leaveForm.endDate
+      );
   const nextAvailableWindow =
     overlappingExisting.length > 0
       ? getNextAvailableLeaveWindow(leaveRequests, resolvedEmpId, leaveForm.startDate)
       : null;
+
+  const handleUploadEvidence = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingEvidence(true);
+    try {
+      const fileBase64 = await readFileAsBase64(file);
+      const uploaded = await apiPost('/api/v1/leave/evidence', {
+        ...(resolvedEmpId ? { employeeId: resolvedEmpId } : {}),
+        fileName: file.name,
+        mimeType: file.type || 'application/pdf',
+        evidenceType: selectedLeaveType?.evidenceType || 'SUPPORTING',
+        fileBase64,
+        notes: `${selectedLeaveType?.name || selectedCode} supporting evidence`,
+      });
+      setLeaveForm((prev) => ({
+        ...prev,
+        evidenceDocumentId: uploaded.documentRecordId,
+        evidenceFileName: uploaded.fileName,
+      }));
+      onShowToast && onShowToast(`Uploaded evidence: ${uploaded.fileName}`);
+    } catch (err) {
+      onShowToast && onShowToast(err?.message || 'Evidence upload failed', 'error');
+    } finally {
+      setUploadingEvidence(false);
+      e.target.value = '';
+    }
+  };
 
   return (
     <div
@@ -143,7 +218,9 @@ export default function LeaveRequestModal({
       <div className="w-full max-w-4xl bg-[#edf1f7] h-full shadow-2xl flex flex-col animate-fadeIn">
         {/* Top Header */}
         <div className="bg-[#f7f9fc] px-6 py-3.5 border-b border-slate-200 flex items-center justify-between">
-          <h2 className="text-[15px] font-semibold text-slate-800">Apply Leave</h2>
+          <h2 className="text-[15px] font-semibold text-slate-800">
+            {leaveForm.editingRequestId ? 'Revise & Resubmit Leave Request' : 'Apply Leave'}
+          </h2>
           <button
             type="button"
             onClick={onClose}
@@ -157,9 +234,26 @@ export default function LeaveRequestModal({
         <form onSubmit={onSubmit} className="flex-1 flex flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto p-5">
             <div className="bg-white rounded-md border border-slate-200 shadow-2xs p-6 max-w-3xl">
-              <h3 className="text-sm font-semibold text-slate-800 pb-4 mb-5 border-b border-slate-100">
-                Leave
-              </h3>
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-4 mb-5 border-b border-slate-100">
+                <h3 className="text-sm font-semibold text-slate-800">Leave Details</h3>
+                {selectedLeaveType && (
+                  <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                    <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-medium">
+                      {selectedLeaveType.isPaid === false ? 'Unpaid' : 'Paid'}
+                    </span>
+                    {selectedLeaveType.noticeDaysRequired > 0 && (
+                      <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-medium">
+                        Notice: {selectedLeaveType.noticeDaysRequired}d
+                      </span>
+                    )}
+                    {requiresEvidence && (
+                      <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold">
+                        Evidence Required ({selectedLeaveType.evidenceType || 'DOCUMENT'})
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
 
               <div className="space-y-5">
                 {/* Leave type * */}
@@ -170,16 +264,17 @@ export default function LeaveRequestModal({
                   <div className="sm:col-span-9 flex items-center gap-3">
                     <select
                       value={selectedCode}
+                      disabled={Boolean(leaveForm.editingRequestId)}
                       onChange={(e) =>
                         setLeaveForm({ ...leaveForm, leaveTypeCode: e.target.value })
                       }
-                      className="w-full max-w-md px-3 py-2 text-xs bg-white border border-slate-300 rounded focus:outline-none focus:border-[#0088ff] text-slate-700"
+                      className="w-full max-w-md px-3 py-2 text-xs bg-white border border-slate-300 rounded focus:outline-none focus:border-[#0088ff] text-slate-700 disabled:bg-slate-100"
                       required
                     >
                       <option value="" disabled>
                         Select
                       </option>
-                      {DEFAULT_LEAVE_TYPES.map((lt) => (
+                      {activeLeaveTypes.map((lt) => (
                         <option key={lt.code} value={lt.code}>
                           {lt.name}
                         </option>
@@ -223,6 +318,34 @@ export default function LeaveRequestModal({
                         />
                       </div>
                     </div>
+
+                    {isSingleDay && selectedLeaveType?.allowHalfDay !== false && (
+                      <div className="flex flex-wrap items-center gap-3 pt-1">
+                        <label className="inline-flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(leaveForm.isHalfDay)}
+                            onChange={(e) =>
+                              setLeaveForm({ ...leaveForm, isHalfDay: e.target.checked })
+                            }
+                            className="rounded border-slate-300 text-[#0088ff]"
+                          />
+                          <span>Half-Day Leave (0.5 day)</span>
+                        </label>
+                        {leaveForm.isHalfDay && (
+                          <select
+                            value={leaveForm.halfDayType || 'MORNING'}
+                            onChange={(e) =>
+                              setLeaveForm({ ...leaveForm, halfDayType: e.target.value })
+                            }
+                            className="px-2.5 py-1 text-xs bg-white border border-slate-300 rounded"
+                          >
+                            <option value="MORNING">Morning</option>
+                            <option value="AFTERNOON">Afternoon</option>
+                          </select>
+                        )}
+                      </div>
+                    )}
 
                     {calcPreview && (
                       <div className="inline-flex items-center gap-3 px-3 py-1.5 bg-blue-50/70 border border-blue-200 rounded text-[11px] text-slate-700">
@@ -327,6 +450,44 @@ export default function LeaveRequestModal({
                     />
                   </div>
                 </div>
+
+                {/* Supporting Evidence Upload */}
+                <div className="grid grid-cols-1 sm:grid-cols-12 items-start gap-3">
+                  <label className="sm:col-span-3 text-xs font-medium text-slate-700 pt-2">
+                    Supporting Evidence {requiresEvidence && <span className="text-rose-500">*</span>}
+                  </label>
+                  <div className="sm:col-span-9 space-y-2 max-w-md">
+                    <label className="flex items-center justify-between gap-2 px-3 py-2 border border-dashed border-slate-300 rounded bg-slate-50 hover:bg-blue-50/40 hover:border-[#0088ff] cursor-pointer transition-colors">
+                      <span className="inline-flex items-center gap-2 text-xs text-slate-600">
+                        <Upload size={14} className="text-[#0088ff]" />
+                        {uploadingEvidence
+                          ? 'Uploading evidence...'
+                          : leaveForm.evidenceFileName
+                          ? `Replace file (${leaveForm.evidenceFileName})`
+                          : `Upload ${selectedLeaveType?.evidenceType || 'supporting'} PDF / image`}
+                      </span>
+                      <input
+                        type="file"
+                        accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx"
+                        disabled={uploadingEvidence}
+                        onChange={handleUploadEvidence}
+                        className="sr-only"
+                      />
+                    </label>
+                    {leaveForm.evidenceDocumentId && (
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-700 font-medium">
+                        <CheckCircle size={12} />
+                        <span>Attached: {leaveForm.evidenceFileName || leaveForm.evidenceDocumentId}</span>
+                      </div>
+                    )}
+                    {requiresEvidence && !leaveForm.evidenceDocumentId && (
+                      <p className="text-[11px] text-amber-700">
+                        {selectedLeaveType?.name || selectedCode} requires uploading supporting{' '}
+                        {selectedLeaveType?.evidenceType || 'documentation'} before submission.
+                      </p>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -335,9 +496,10 @@ export default function LeaveRequestModal({
           <div className="bg-white px-6 py-3 border-t border-slate-200 flex items-center gap-2.5">
             <button
               type="submit"
-              className="px-4 py-1.5 bg-[#0088ff] hover:bg-[#0073d9] text-white text-xs font-medium rounded shadow-2xs transition-colors"
+              disabled={uploadingEvidence || (requiresEvidence && !leaveForm.evidenceDocumentId)}
+              className="px-4 py-1.5 bg-[#0088ff] hover:bg-[#0073d9] disabled:opacity-50 text-white text-xs font-medium rounded shadow-2xs transition-colors"
             >
-              Submit
+              {leaveForm.editingRequestId ? 'Resubmit Leave' : 'Submit'}
             </button>
             <button
               type="button"

@@ -1744,12 +1744,17 @@ export default function MyWorkspaceView({
                           >
                             <div>
                               <p className="font-semibold text-slate-800">
-                                {req.employee?.fullName || req.employeeId} —{' '}
-                                {req.leaveType?.name || req.leaveTypeCode || 'Annual Leave'}
+                                {req.employee?.fullName ||
+                                  (req.employee
+                                    ? `${req.employee.firstName || ''} ${req.employee.lastName || ''}`.trim()
+                                    : '') ||
+                                  empNameMap[req.employeeId] ||
+                                  req.employeeId}{' '}
+                                — {req.leaveType?.name || req.leaveTypeCode || 'Annual Leave'}
                               </p>
                               <p className="text-slate-500 mt-0.5">
                                 {req.startDate?.slice(0, 10)} to {req.endDate?.slice(0, 10)} (
-                                {req.daysRequested || req.chargeableDays || 1} days)
+                                {req.workingDaysDeducted ?? req.daysRequested ?? req.chargeableDays ?? 1} days)
                               </p>
                             </div>
                             <div className="flex items-center gap-2">
@@ -1805,7 +1810,7 @@ export default function MyWorkspaceView({
                               </button>
                               <button
                                 type="button"
-                                onClick={() => setActiveTab && setActiveTab('leave', 'mydata')}
+                                onClick={() => setActiveTab && setActiveTab('inbox', 'mydata')}
                                 className="px-3 py-1 border border-slate-300 text-slate-700 rounded text-xs font-medium hover:bg-slate-50"
                               >
                                 Open Leave Module →
@@ -1818,7 +1823,7 @@ export default function MyWorkspaceView({
                                 <p className="font-semibold text-slate-800">
                                   {req.leaveType?.name || req.leaveTypeCode || 'Leave'} — {req.startDate?.slice(0, 10)} to {req.endDate?.slice(0, 10)}
                                 </p>
-                                <p className="text-[11px] text-slate-500">{req.daysRequested || req.chargeableDays || 1} day(s) • Status: {req.status}</p>
+                                <p className="text-[11px] text-slate-500">{req.workingDaysDeducted ?? req.daysRequested ?? req.chargeableDays ?? 1} day(s) • Status: {req.status}</p>
                               </div>
                               <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px] font-medium">
                                 {req.status}
@@ -2857,13 +2862,18 @@ export default function MyWorkspaceView({
                                   {leaveRequests.slice(0, 8).map((lr) => (
                                     <tr key={lr.id}>
                                       <td className="py-2 px-3 font-medium text-slate-800">
-                                        {lr.employee?.fullName || empNameMap[lr.employeeId] || lr.employeeId}
+                                        {lr.employee?.fullName ||
+                                          (lr.employee
+                                            ? `${lr.employee.firstName || ''} ${lr.employee.lastName || ''}`.trim()
+                                            : '') ||
+                                          empNameMap[lr.employeeId] ||
+                                          lr.employeeId}
                                       </td>
                                       <td className="py-2 px-3 text-slate-600">{lr.leaveType?.name || lr.leaveTypeCode || 'Leave'}</td>
                                       <td className="py-2 px-3 text-slate-500">
                                         {String(lr.startDate || '').slice(0, 10)} → {String(lr.endDate || '').slice(0, 10)}
                                       </td>
-                                      <td className="py-2 px-3 text-slate-700">{lr.daysRequested}</td>
+                                      <td className="py-2 px-3 text-slate-700">{lr.workingDaysDeducted ?? lr.daysRequested ?? '-'}</td>
                                       <td className="py-2 px-3">
                                         <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-medium">
                                           {lr.status}

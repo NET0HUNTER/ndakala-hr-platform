@@ -51,6 +51,49 @@ export function unwrapList(data) {
   return [];
 }
 
+/**
+ * Computes user-friendly available, entitled, taken, and reserved days from a LeaveBalance row.
+ */
+export function computeLeaveBalanceStats(balance) {
+  if (!balance) return { availableDays: 0, entitledDays: 0, takenDays: 0, reservedDays: 0, closingDays: 0 };
+  const closingDays = Number(balance.closingBalanceDays ?? 0);
+  const reservedDays = Number(balance.pendingReservedDays ?? 0);
+  const takenDays = Number(balance.takenDays ?? balance.usedDays ?? 0);
+  const entitledDays = Number(
+    (balance.entitlementDays ?? 0) +
+      (balance.accruedDays ?? 0) +
+      (balance.carriedForwardDays ?? 0) +
+      (balance.adjustedDays ?? 0)
+  );
+  const availableDays =
+    typeof balance.availableDays === 'number'
+      ? balance.availableDays
+      : Number((closingDays - reservedDays).toFixed(2));
+  return {
+    availableDays,
+    entitledDays: Number(entitledDays.toFixed(2)),
+    takenDays: Number(takenDays.toFixed(2)),
+    reservedDays: Number(reservedDays.toFixed(2)),
+    closingDays: Number(closingDays.toFixed(2)),
+  };
+}
+
+/**
+ * Reads a browser File object as pure base64 (stripping data:*;base64, prefix).
+ */
+export function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const commaIdx = result.indexOf(',');
+      resolve(commaIdx >= 0 ? result.slice(commaIdx + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
 export async function apiRequest(url, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
   const headers = { ...(options.headers || {}) };

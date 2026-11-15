@@ -468,4 +468,147 @@ describe('Leave Management, Ledger Invariants & Work Arrangements (Phase 3)', ()
       expect(emp.isActive).toBe(true);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // 7. Evidence Upload/Download, Return/Resubmit & Absence Review E2E
+  // -------------------------------------------------------------------------
+  describe('Evidence Upload, Return/Resubmit, Manager Visibility & Absence Review', () => {
+    it('enforces evidence on SICK leave, allows employee PDF upload & signed HR download', async () => {
+      // 1. SICK leave without evidenceDocumentId is rejected (400)
+      const missingEv = await employeeClient.agent
+        .post('/api/v1/leave/requests')
+        .set('x-csrf-token', employeeClient.csrfToken)
+        .send({
+          leaveTypeCode: 'SICK',
+          startDate: '2026-07-06',
+          endDate: '2026-07-06',
+          isHalfDay: true,
+          halfDayType: 'MORNING',
+          handoverNotes: 'Doctor visit in the morning',
+        });
+      expect(missingEv.status).toBe(400);
+      expect(missingEv.body.error.message).toContain('requires supporting');
+
+      // 2. Employee uploads medical certificate PDF via /api/v1/leave/evidence
+      const pdfBytes = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n');
+      const upRes = await employeeClient.agent
+        .post('/api/v1/leave/evidence')
+        .set('x-csrf-token', employeeClient.csrfToken)
+        .send({
+          fileName: 'medical-note.pdf',
+          mimeType: 'application/pdf',
+          evidenceType: 'MEDICAL',
+          fileBase64: pdfBytes.toString('base64'),
+        });
+      expect(upRes.status).toBe(201);
+      expect(upRes.body.data.documentRecordId).toBeDefined();
+
+      // 3. Submit half-day SICK leave with evidence attached
+      const subRes = await employeeClient.agent
+        .post('/api/v1/leave/requests')
+        .set('x-csrf-token', employeeClient.csrfToken)
+        .send({
+          leaveTypeCode: 'SICK',
+          startDate: '2026-07-06',
+          endDate: '2026-07-06',
+          isHalfDay: true,
+          halfDayType: 'MORNING',
+          handoverNotes: 'Half-day medical recovery',
+          evidenceDocumentId: upRes.body.data.documentRecordId,
+        });
+      expect(subRes.status).toBe(201);
+      expect(subRes.body.data.calculation.netWorkingDays).toBe(0.5);
+      const sickReqId = subRes.body.data.request.id;
+
+      // 4. HR generates signed token & downloads PDF (while ordinary manager cannot access MEDICAL evidence)
+      const mgrTokenRes = await managerClient.agent
+        .post(`/api/v1/leave/requests/${sickReqId}/evidence-token`)
+        .set('x-csrf-token', managerClient.csrfToken)
+        .send();
+      expect(mgrTokenRes.status).toBe(403);
+
+      const hrTokenRes = await hrClient.agent
+        .post(`/api/v1/leave/requests/${sickReqId}/evidence-token`)
+        .set('x-csrf-token', hrClient.csrfToken)
+        .send();
+      expect(hrTokenRes.status).toBe(200);
+      expect(hrTokenRes.body.data.fileName).toBe('medical-note.pdf');
+
+      const dlRes = await hrClient.agent.get(hrTokenRes.body.data.downloadUrl);
+      expect(dlRes.status).toBe(200);
+
+      // Cleanup
+      await employeeClient.agent
+        .post(`/api/v1/leave/requests/${sickReqId}/withdraw`)
+        .set('x-csrf-token', employeeClient.csrfToken);
+    });
+
+    it('supports Line Manager visibility, RETURN -> resubmit -> APPROVE, and Absence review', async () => {
+      // 1. Employee submits ANNUAL leave
+      const subRes = await employeeClient.agent
+        .post('/api/v1/leave/requests')
+        .set('x-csrf-token', employeeClient.csrfToken)
+        .send({
+          leaveTypeCode: 'ANNUAL',
+          startDate: '2026-08-03',
+          endDate: '2026-08-05',
+          handoverNotes: 'Planned break',
+        });
+      expect(subRes.status).toBe(201);
+      const reqId = subRes.body.data.request.id;
+
+      // 2. Line Manager sees report's request in default /api/v1/leave/requests list (no teamOnly query needed)
+      const mgrList = await managerClient.agent.get('/api/v1/leave/requests');
+      expect(mgrList.status).toBe(200);
+      expect(mgrList.body.data.some((r: any) => r.id === reqId)).toBe(true);
+
+      // 3. Line Manager returns request for edit
+      const retRes = await managerClient.agent
+        .post(`/api/v1/leave/requests/${reqId}/review`)
+        .set('x-csrf-token', managerClient.csrfToken)
+        .send({ decision: 'RETURN', comments: 'Please add handover colleague details' });
+      expect(retRes.status).toBe(200);
+      expect(retRes.body.data.request.status).toBe('RETURNED_FOR_EDIT');
+
+      // 4. Employee revises dates & resubmits
+      const resubRes = await employeeClient.agent
+        .post(`/api/v1/leave/requests/${reqId}/resubmit`)
+        .set('x-csrf-token', employeeClient.csrfToken)
+        .send({
+          startDate: '2026-08-04',
+          endDate: '2026-08-05',
+          handoverNotes: 'Handover assigned to colleague; 2 days only',
+        });
+      expect(resubRes.status).toBe(200);
+      expect(resubRes.body.data.request.status).toBe('PENDING_APPROVAL');
+      expect(resubRes.body.data.calculation.netWorkingDays).toBe(2);
+
+      // 5. Manager approves resubmitted request
+      const appRes = await managerClient.agent
+        .post(`/api/v1/leave/requests/${reqId}/review`)
+        .set('x-csrf-token', managerClient.csrfToken)
+        .send({ decision: 'APPROVE', comments: 'Approved after update' });
+      expect(appRes.status).toBe(200);
+      expect(appRes.body.data.request.status).toBe('APPROVED');
+
+      // 6. Log & review unexpected absence -> EXCUSED
+      const absRes = await employeeClient.agent
+        .post('/api/v1/absences')
+        .set('x-csrf-token', employeeClient.csrfToken)
+        .send({
+          employeeId: testEmployeeId,
+          startDate: '2026-08-10',
+          reasonCategory: 'FAMILY_EMERGENCY',
+          contactChannel: 'WHATSAPP',
+          notes: 'Family emergency in the morning',
+        });
+      expect(absRes.status).toBe(201);
+      const revAbs = await managerClient.agent
+        .post(`/api/v1/absences/${absRes.body.data.id}/review`)
+        .set('x-csrf-token', managerClient.csrfToken)
+        .send({ status: 'EXCUSED', notes: 'Approved by line manager' });
+      expect(revAbs.status).toBe(200);
+      expect(revAbs.body.data.status).toBe('EXCUSED');
+    });
+  });
 });

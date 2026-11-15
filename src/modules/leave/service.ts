@@ -107,6 +107,20 @@ export async function submitLeaveRequest(
     throw notFound('LeaveType', input.leaveTypeCode);
   }
 
+  if (leaveType.requiresEvidence && !input.evidenceDocumentId) {
+    throw validation(
+      `${leaveType.name} requires supporting ${leaveType.evidenceType || 'document'} evidence before submission.`,
+    );
+  }
+  if (input.evidenceDocumentId) {
+    const doc = await prisma.documentRecord.findUnique({
+      where: { id: input.evidenceDocumentId },
+    });
+    if (!doc || doc.isArchived) {
+      throw notFound('DocumentRecord', input.evidenceDocumentId);
+    }
+  }
+
   const startDate = new Date(input.startDate);
   const endDate = new Date(input.endDate);
   startDate.setHours(0, 0, 0, 0);
@@ -662,5 +676,199 @@ export async function cancelApprovedLeave(
     });
 
     return { request: cancelled, reversalEntry: entry };
+  });
+}
+
+export interface ResubmitLeaveInput {
+  requestId: string;
+  startDate?: string;
+  endDate?: string;
+  isHalfDay?: boolean;
+  halfDayType?: 'MORNING' | 'AFTERNOON' | null;
+  handoverEmployeeId?: string | null;
+  handoverNotes?: string | null;
+  reason?: string | null;
+  evidenceDocumentId?: string | null;
+}
+
+/**
+ * Revises and resubmits a RETURNED_FOR_EDIT leave request back to PENDING_APPROVAL.
+ */
+export async function resubmitLeaveRequest(
+  prisma: PrismaClient,
+  auth: AuthContext,
+  input: ResubmitLeaveInput,
+) {
+  const req = await prisma.leaveRequest.findUnique({
+    where: { id: input.requestId },
+    include: {
+      employee: {
+        select: {
+          id: true,
+          userId: true,
+          firstName: true,
+          lastName: true,
+          locationId: true,
+          managerId: true,
+          manager: { select: { id: true, userId: true } },
+        },
+      },
+      leaveType: true,
+    },
+  });
+  if (!req) throw notFound('LeaveRequest', input.requestId);
+
+  if (req.employee.userId !== auth.userId && !auth.permissions.has('leave.manage')) {
+    throw forbidden('Only the applicant or HR can resubmit this leave request.');
+  }
+  if (req.status !== 'RETURNED_FOR_EDIT') {
+    throw conflict(`Only RETURNED_FOR_EDIT requests can be resubmitted (current: '${req.status}').`);
+  }
+
+  const startDate = input.startDate ? new Date(input.startDate) : new Date(req.startDate);
+  const endDate = input.endDate ? new Date(input.endDate) : new Date(req.endDate);
+  startDate.setHours(0, 0, 0, 0);
+  endDate.setHours(0, 0, 0, 0);
+  if (endDate < startDate) {
+    throw validation('End date cannot be earlier than start date');
+  }
+
+  const isHalfDay = input.isHalfDay ?? req.isHalfDay;
+  const halfDayType = (input.halfDayType !== undefined ? input.halfDayType : req.halfDayType) as
+    | 'MORNING'
+    | 'AFTERNOON'
+    | null;
+  const evidenceDocumentId =
+    input.evidenceDocumentId !== undefined ? input.evidenceDocumentId : req.evidenceDocumentId;
+
+  if (req.leaveType.requiresEvidence && !evidenceDocumentId) {
+    throw validation(
+      `${req.leaveType.name} requires supporting ${req.leaveType.evidenceType || 'document'} evidence before resubmission.`,
+    );
+  }
+  if (evidenceDocumentId) {
+    const doc = await prisma.documentRecord.findUnique({ where: { id: evidenceDocumentId } });
+    if (!doc || doc.isArchived) throw notFound('DocumentRecord', evidenceDocumentId);
+  }
+
+  const overlapping = await prisma.leaveRequest.findFirst({
+    where: {
+      id: { not: req.id },
+      employeeId: req.employeeId,
+      status: { in: ['PENDING_APPROVAL', 'APPROVED'] },
+      AND: [{ startDate: { lte: endDate } }, { endDate: { gte: startDate } }],
+    },
+  });
+  if (overlapping) {
+    throw conflict(
+      `Updated dates overlap existing ${overlapping.status} request (${overlapping.requestNumber}).`,
+    );
+  }
+
+  const schedule = await resolveWorkSchedule(prisma, req.employeeId, startDate);
+  const holidays = await prisma.publicHoliday.findMany({
+    where: {
+      date: { gte: startDate, lte: endDate },
+      OR: [{ locationId: null }, { locationId: req.employee.locationId }],
+    },
+  });
+  const calc = calculateWorkingDays(
+    startDate,
+    endDate,
+    schedule,
+    holidays.map((h) => ({ date: h.date, name: h.name, isHalfDay: h.isHalfDay })),
+    isHalfDay,
+    halfDayType,
+  );
+  if (calc.netWorkingDays <= 0) {
+    throw validation('The selected date range contains 0 working days.');
+  }
+
+  const leaveYear = startDate.getFullYear();
+
+  return prisma.$transaction(async (tx) => {
+    let balance = await tx.leaveBalance.findUnique({
+      where: {
+        employeeId_leaveTypeId_leaveYear: {
+          employeeId: req.employeeId,
+          leaveTypeId: req.leaveTypeId,
+          leaveYear,
+        },
+      },
+    });
+    if (!balance) {
+      const initialEntitlement = req.leaveType.defaultEntitlementDays || req.leaveType.statutoryFloorDays || 21.0;
+      const initialized = await postLedgerEntry(tx, {
+        employeeId: req.employeeId,
+        leaveTypeId: req.leaveTypeId,
+        leaveYear,
+        entryType: 'OPENING_BALANCE',
+        amountDays: initialEntitlement,
+        sourceType: 'YEAR_END_CLOSE',
+        notes: `Automatic ${leaveYear} opening entitlement for ${req.leaveType.name}`,
+        actorUserId: auth.userId,
+      });
+      balance = initialized.balance;
+    }
+
+    const availableBalance = balance.closingBalanceDays - balance.pendingReservedDays;
+    const prospectiveAvailable = availableBalance - calc.netWorkingDays;
+    if (prospectiveAvailable < 0) {
+      const isAllowed = req.leaveType.negativeBalancePolicy === 'ALLOWED_WITH_LIMIT';
+      const limit = req.leaveType.maxNegativeBalanceDays || 0;
+      if (!isAllowed || Math.abs(prospectiveAvailable) > limit) {
+        throw validation(
+          `Insufficient leave balance: Available is ${availableBalance.toFixed(2)} days; requested ${calc.netWorkingDays.toFixed(2)} days.`,
+        );
+      }
+    }
+
+    const updated = await tx.leaveRequest.update({
+      where: { id: req.id },
+      data: {
+        startDate,
+        endDate,
+        isHalfDay,
+        halfDayType,
+        calendarDays: calc.calendarDays,
+        workingDaysDeducted: calc.netWorkingDays,
+        deductionBreakdown: JSON.stringify(calc),
+        handoverEmployeeId:
+          input.handoverEmployeeId !== undefined ? input.handoverEmployeeId : req.handoverEmployeeId,
+        handoverNotes: input.handoverNotes !== undefined ? input.handoverNotes : req.handoverNotes,
+        reason: input.reason !== undefined ? input.reason : req.reason,
+        evidenceDocumentId,
+        status: 'PENDING_APPROVAL',
+        rejectionReason: null,
+        submittedAt: new Date(),
+      },
+    });
+
+    await tx.leaveReservation.create({
+      data: {
+        leaveRequestId: req.id,
+        employeeId: req.employeeId,
+        leaveTypeId: req.leaveTypeId,
+        leaveYear,
+        reservedDays: calc.netWorkingDays,
+        status: 'ACTIVE',
+      },
+    });
+
+    await tx.leaveBalance.update({
+      where: { id: balance.id },
+      data: { pendingReservedDays: { increment: calc.netWorkingDays } },
+    });
+
+    if (req.employee.manager?.userId) {
+      await notifyUser(tx, req.employee.manager.userId, {
+        title: 'Leave Request Resubmitted',
+        message: `${req.employee.firstName} ${req.employee.lastName} updated and resubmitted ${req.requestNumber} (${calc.netWorkingDays} day(s)).`,
+        deepLink: `/leave-requests/${req.id}`,
+        idempotencyKey: `leave-resubmit:${req.id}:${Date.now()}`,
+      });
+    }
+
+    return { request: updated, calculation: calc };
   });
 }

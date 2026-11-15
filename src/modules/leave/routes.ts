@@ -17,9 +17,16 @@ import {
   reviewLeaveRequest,
   withdrawLeaveRequest,
   cancelApprovedLeave,
+  resubmitLeaveRequest,
   resolveWorkSchedule,
 } from './service.js';
 import { recordAbsence, runMonthlyAccrualJob } from './absence.service.js';
+import {
+  validateUploadFile,
+  storeFile,
+  generateSignedDownloadToken,
+} from '../../core/storage/storage.js';
+import { notifyUser } from '../notifications/service.js';
 
 export function createLeaveRouter(deps: AppDeps): Router {
   const router = Router();
@@ -29,10 +36,16 @@ export function createLeaveRouter(deps: AppDeps): Router {
     method: 'get',
     path: '/leave/types',
     auth: 'session',
-    handler: async ({ deps }) => {
+    query: z.object({ includeInactive: z.enum(['true', 'false']).optional() }).optional(),
+    handler: async ({ query, auth, deps }) => {
+      const canSeeDrafts =
+        query?.includeInactive === 'true' &&
+        (auth.permissions.has('leave.config') ||
+          auth.permissions.has('config.approve') ||
+          auth.permissions.has('leave.view_all'));
       return deps.prisma.leaveType.findMany({
-        where: { isActive: true },
-        orderBy: { code: 'asc' },
+        where: canSeeDrafts ? {} : { isActive: true },
+        orderBy: [{ isActive: 'desc' }, { code: 'asc' }],
       });
     },
   });
@@ -395,6 +408,98 @@ export function createLeaveRouter(deps: AppDeps): Router {
     },
   });
 
+  // 9a. Upload Supporting Evidence for Leave Request (Sick/Maternity/Paternity/Study)
+  registerRoute(router, deps, {
+    method: 'post',
+    path: '/leave/evidence',
+    auth: { permission: 'leave.request' },
+    successStatus: 201,
+    body: z.object({
+      employeeId: z.string().uuid().optional(),
+      fileName: z.string().min(1).max(255),
+      mimeType: z.string().min(1).max(120),
+      evidenceType: z.string().max(50).optional(),
+      fileBase64: z.string().min(1),
+      notes: z.string().max(500).optional(),
+    }),
+    handler: async ({ body, auth, req, deps }) => {
+      const myEmpId = await getActorEmployeeId(deps.prisma, auth.userId);
+      let targetEmpId = body.employeeId;
+      if (!targetEmpId) {
+        if (myEmpId) {
+          targetEmpId = myEmpId;
+        } else {
+          const fallbackEmp = await deps.prisma.employee.findFirst({
+            where: { isActive: true },
+            orderBy: { createdAt: 'asc' },
+          });
+          if (!fallbackEmp) throw validation('No active employee record associated with workspace');
+          targetEmpId = fallbackEmp.id;
+        }
+      } else if (targetEmpId !== myEmpId && !auth.permissions.has('leave.manage')) {
+        throw forbidden('Access denied: cannot upload leave evidence for another employee');
+      }
+
+      const buffer = Buffer.from(body.fileBase64, 'base64');
+      validateUploadFile(body.fileName, body.mimeType, buffer.length);
+      const { storageKey, storagePath, checksumSha256 } = storeFile(buffer, body.fileName);
+
+      const isMedical = String(body.evidenceType || '').toUpperCase() === 'MEDICAL';
+      const documentType = isMedical ? 'MEDICAL' : 'OTHER';
+      const visibility = isMedical ? 'MEDICAL_RESTRICTED' : 'HR_EMPLOYEE_MANAGER';
+      const securityClassification = isMedical ? 'RESTRICTED' : 'CONFIDENTIAL';
+
+      const docRecord = await deps.prisma.documentRecord.create({
+        data: {
+          fileName: body.fileName,
+          mimeType: body.mimeType,
+          fileSizeBytes: buffer.length,
+          storageKey,
+          storagePath,
+          checksumSha256,
+          category: 'COMPLIANCE',
+          securityClassification,
+          uploadedById: auth.userId,
+        },
+      });
+
+      const empDoc = await deps.prisma.employeeDocument.create({
+        data: {
+          employeeId: targetEmpId,
+          documentRecordId: docRecord.id,
+          documentType,
+          visibility,
+          uploadedById: auth.userId,
+          notes: body.notes || `Leave evidence (${body.evidenceType || 'SUPPORTING'})`,
+        },
+      });
+
+      await writeAudit(deps.prisma, auditCtx(auth, req), {
+        action: 'LEAVE_EVIDENCE_UPLOADED',
+        targetType: 'DocumentRecord',
+        targetId: docRecord.id,
+        outcome: 'SUCCESS',
+        after: {
+          employeeId: targetEmpId,
+          employeeDocumentId: empDoc.id,
+          fileName: docRecord.fileName,
+          documentType,
+          visibility,
+        },
+      });
+
+      return {
+        documentRecordId: docRecord.id,
+        employeeDocumentId: empDoc.id,
+        fileName: docRecord.fileName,
+        mimeType: docRecord.mimeType,
+        fileSizeBytes: docRecord.fileSizeBytes,
+        documentType,
+        visibility,
+      };
+    },
+  });
+
   // 9. Submit Leave Request
   registerRoute(router, deps, {
     method: 'post',
@@ -487,9 +592,13 @@ export function createLeaveRouter(deps: AppDeps): Router {
         }
         where.employeeId = query.employeeId;
       } else if (query?.teamOnly === 'true' && isManager && myEmpId) {
-        // Team calendar
+        // Team calendar (direct/indirect reports)
         const reports = await getReportingLineIds(deps.prisma, myEmpId);
         where.employeeId = { in: Array.from(reports) };
+      } else if (!isHR && isManager && myEmpId) {
+        // Manager workspace: own requests + reporting line requests
+        const reports = await getReportingLineIds(deps.prisma, myEmpId);
+        where.employeeId = { in: [myEmpId, ...Array.from(reports)] };
       } else if (!isHR) {
         // Standard employee view: only own requests
         if (!myEmpId) return [];
@@ -500,10 +609,10 @@ export function createLeaveRouter(deps: AppDeps): Router {
         where,
         include: {
           employee: {
-            select: { id: true, firstName: true, lastName: true, employeeNumber: true, workEmail: true },
+            select: { id: true, userId: true, firstName: true, lastName: true, employeeNumber: true, workEmail: true },
           },
           leaveType: {
-            select: { code: true, name: true, category: true, isPaid: true },
+            select: { code: true, name: true, category: true, isPaid: true, requiresEvidence: true, evidenceType: true },
           },
           handoverEmployee: {
             select: { id: true, firstName: true, lastName: true },
@@ -512,12 +621,31 @@ export function createLeaveRouter(deps: AppDeps): Router {
         orderBy: { startDate: 'desc' },
       });
 
-      // Privacy Filter: hide reasons from peer/team calendar views
+      const evidenceIds = Array.from(
+        new Set(requests.map((r) => r.evidenceDocumentId).filter((id): id is string => Boolean(id))),
+      );
+      const evidenceDocs =
+        evidenceIds.length > 0
+          ? await deps.prisma.documentRecord.findMany({
+              where: { id: { in: evidenceIds } },
+              select: { id: true, fileName: true, mimeType: true, fileSizeBytes: true },
+            })
+          : [];
+      const docMap = new Map(evidenceDocs.map((d) => [d.id, d]));
+
+      // Privacy Filter: hide confidential reasons & medical filenames where restricted
       return requests.map((r) => {
         const isSelf = r.employeeId === myEmpId;
+        const canSeeDoc =
+          Boolean(r.evidenceDocumentId) &&
+          (isSelf ||
+            isHR ||
+            (r.leaveType?.evidenceType !== 'MEDICAL' && isManager));
+        const evDoc = canSeeDoc && r.evidenceDocumentId ? docMap.get(r.evidenceDocumentId) : null;
         return {
           ...r,
-          reason: isSelf || isHR ? r.reason : undefined, // Hide private reason from ordinary managers/peers
+          reason: isSelf || isHR ? r.reason : undefined,
+          evidenceFileName: evDoc?.fileName ?? null,
         };
       });
     },
@@ -593,6 +721,90 @@ export function createLeaveRouter(deps: AppDeps): Router {
       });
 
       return result;
+    },
+  });
+
+  // 13b. Resubmit Returned Leave Request (Applicant or HR)
+  registerRoute(router, deps, {
+    method: 'post',
+    path: '/leave/requests/:id/resubmit',
+    auth: { permission: 'leave.request' },
+    params: z.object({ id: z.string().uuid() }),
+    body: z.object({
+      startDate: zDate.optional(),
+      endDate: zDate.optional(),
+      isHalfDay: z.boolean().optional(),
+      halfDayType: z.enum(['MORNING', 'AFTERNOON']).nullable().optional(),
+      handoverEmployeeId: z.string().uuid().nullable().optional(),
+      handoverNotes: z.string().max(500).optional(),
+      reason: z.string().max(500).optional(),
+      evidenceDocumentId: z.string().uuid().nullable().optional(),
+    }),
+    handler: async ({ params, body, auth, req, deps }) => {
+      const result = await resubmitLeaveRequest(deps.prisma, auth, {
+        requestId: params.id,
+        ...body,
+      });
+
+      await writeAudit(deps.prisma, auditCtx(auth, req), {
+        action: 'LEAVE_REQUEST_RESUBMITTED',
+        targetType: 'LeaveRequest',
+        targetId: params.id,
+        outcome: 'SUCCESS',
+        after: { netWorkingDays: result.calculation.netWorkingDays },
+      });
+
+      return result;
+    },
+  });
+
+  // 13c. Signed Download Token for Leave Request Evidence
+  registerRoute(router, deps, {
+    method: 'post',
+    path: '/leave/requests/:id/evidence-token',
+    auth: 'session',
+    params: z.object({ id: z.string().uuid() }),
+    handler: async ({ params, auth, deps }) => {
+      const leaveReq = await deps.prisma.leaveRequest.findUnique({
+        where: { id: params.id },
+        include: { employee: true, leaveType: true },
+      });
+      if (!leaveReq || !leaveReq.evidenceDocumentId) {
+        throw notFound('LeaveRequestEvidence', params.id);
+      }
+
+      const myEmpId = await getActorEmployeeId(deps.prisma, auth.userId);
+      const isSelf = leaveReq.employee.userId === auth.userId || leaveReq.employeeId === myEmpId;
+      const hasAll = auth.permissions.has('leave.view_all');
+      const hasMedical = auth.permissions.has('employees.view_medical');
+      let isManager = false;
+      if (myEmpId && auth.permissions.has('leave.view_team')) {
+        const team = await getReportingLineIds(deps.prisma, myEmpId);
+        isManager = team.has(leaveReq.employeeId);
+      }
+
+      const isMedicalEvidence = leaveReq.leaveType.evidenceType === 'MEDICAL';
+      const allowed = isMedicalEvidence
+        ? isSelf || hasMedical || hasAll
+        : isSelf || hasAll || isManager;
+
+      if (!allowed) {
+        throw forbidden('Access denied: insufficient permission to download this leave evidence');
+      }
+
+      const doc = await deps.prisma.documentRecord.findUnique({
+        where: { id: leaveReq.evidenceDocumentId },
+      });
+      if (!doc || doc.isArchived) throw notFound('DocumentRecord', leaveReq.evidenceDocumentId);
+
+      const downloadToken = generateSignedDownloadToken(doc.id, 300);
+      return {
+        documentId: doc.id,
+        fileName: doc.fileName,
+        downloadToken,
+        expiresInSeconds: 300,
+        downloadUrl: `/api/v1/documents/download?token=${downloadToken}`,
+      };
     },
   });
 
@@ -722,13 +934,23 @@ export function createLeaveRouter(deps: AppDeps): Router {
     handler: async ({ query, auth, deps }) => {
       const myEmpId = await getActorEmployeeId(deps.prisma, auth.userId);
       const isHR = auth.permissions.has('absence.manage');
+      const isManager = auth.permissions.has('leave.view_team');
 
       const where: any = {};
       if (query?.employeeId) {
         if (query.employeeId !== myEmpId && !isHR) {
-          throw forbidden('Access denied: cannot view another employee absence records');
+          if (!isManager || !myEmpId) {
+            throw forbidden('Access denied: cannot view another employee absence records');
+          }
+          const team = await getReportingLineIds(deps.prisma, myEmpId);
+          if (!team.has(query.employeeId)) {
+            throw forbidden('Access denied: cannot view another employee absence records');
+          }
         }
         where.employeeId = query.employeeId;
+      } else if (!isHR && isManager && myEmpId) {
+        const team = await getReportingLineIds(deps.prisma, myEmpId);
+        where.employeeId = { in: [myEmpId, ...Array.from(team)] };
       } else if (!isHR) {
         if (!myEmpId) return [];
         where.employeeId = myEmpId;
@@ -743,6 +965,66 @@ export function createLeaveRouter(deps: AppDeps): Router {
         },
         orderBy: { startDate: 'desc' },
       });
+    },
+  });
+
+  // 19. Review / Excuse / Flag Unexpected Absence
+  registerRoute(router, deps, {
+    method: 'post',
+    path: '/absences/:id/review',
+    auth: 'session',
+    params: z.object({ id: z.string().uuid() }),
+    body: z.object({
+      status: z.enum(['EXCUSED', 'INVESTIGATION_REQUIRED', 'RETROSPECTIVE_LEAVE_REQUESTED']),
+      notes: z.string().max(500).optional(),
+      linkedLeaveRequestId: z.string().uuid().optional(),
+    }),
+    handler: async ({ params, body, auth, req, deps }) => {
+      const absence = await deps.prisma.absenceRecord.findUnique({
+        where: { id: params.id },
+        include: { employee: { select: { id: true, userId: true, firstName: true, lastName: true } } },
+      });
+      if (!absence) throw notFound('AbsenceRecord', params.id);
+
+      const myEmpId = await getActorEmployeeId(deps.prisma, auth.userId);
+      const isHR = auth.permissions.has('absence.manage');
+      let isManager = false;
+      if (!isHR && myEmpId && auth.permissions.has('leave.view_team')) {
+        const team = await getReportingLineIds(deps.prisma, myEmpId);
+        isManager = team.has(absence.employeeId);
+      }
+      if (!isHR && !isManager) {
+        throw forbidden('Access denied: only HR or the reporting line manager can review absence records');
+      }
+
+      const updated = await deps.prisma.absenceRecord.update({
+        where: { id: params.id },
+        data: {
+          status: body.status,
+          ...(body.notes ? { notes: body.notes } : {}),
+          ...(body.linkedLeaveRequestId ? { linkedLeaveRequestId: body.linkedLeaveRequestId } : {}),
+        },
+      });
+
+      if (absence.employee.userId) {
+        await notifyUser(deps.prisma, absence.employee.userId, {
+          title: 'Absence Record Reviewed',
+          message: `Your absence from ${absence.startDate.toISOString().slice(0, 10)} was updated to ${body.status}.`,
+          deepLink: `/absences/${absence.id}`,
+          idempotencyKey: `absence-review:${absence.id}:${body.status}`,
+        });
+      }
+
+      await writeAudit(deps.prisma, auditCtx(auth, req), {
+        action: 'ABSENCE_REVIEWED',
+        targetType: 'AbsenceRecord',
+        targetId: absence.id,
+        outcome: 'SUCCESS',
+        before: { status: absence.status },
+        after: { status: body.status, notes: body.notes, linkedLeaveRequestId: body.linkedLeaveRequestId },
+      });
+
+      return updated;
     },
   });
 

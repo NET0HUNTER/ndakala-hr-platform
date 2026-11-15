@@ -61,8 +61,15 @@ export default function App() {
     leaveTypeCode: 'ANNUAL',
     startDate: '2026-11-16',
     endDate: '2026-11-18',
+    isHalfDay: false,
+    halfDayType: 'MORNING',
     handoverNotes: '',
     handoverEmployeeId: '',
+    evidenceDocumentId: '',
+    evidenceFileName: '',
+    editingRequestId: null,
+    linkedAbsenceId: null,
+    targetEmployeeId: '',
   });
   const [absenceModalOpen, setAbsenceModalOpen] = useState(false);
   const [absenceForm, setAbsenceForm] = useState({
@@ -92,7 +99,8 @@ export default function App() {
   }, []);
 
   const handleSelectModule = (nextTab, nextTopTab = null, nextSubView = null) => {
-    setActiveTab(nextTab);
+    const normalizedTab = nextTab === 'leave' ? 'inbox' : nextTab;
+    setActiveTab(normalizedTab);
     setSubViewHint(nextSubView || null);
     const defaultTopMap = {
       workspace: 'myspace',
@@ -112,7 +120,7 @@ export default function App() {
       reports: 'myreports',
       hardening: 'orgsettings',
     };
-    const resolvedTop = nextTopTab || defaultTopMap[nextTab];
+    const resolvedTop = nextTopTab || defaultTopMap[normalizedTab];
     if (resolvedTop) {
       setTopContextTab(resolvedTop);
     }
@@ -278,7 +286,29 @@ export default function App() {
     showToast('Signed out cleanly.');
   };
 
-  const handleOpenLeaveModal = () => {
+  const handleOpenLeaveModal = (prefill = null) => {
+    const isDomEvent = prefill && typeof prefill.preventDefault === 'function';
+    const override = !isDomEvent && prefill && typeof prefill === 'object' ? prefill : null;
+    if (override) {
+      setLeaveForm((prev) => ({
+        ...prev,
+        leaveTypeCode: override.leaveTypeCode || 'ANNUAL',
+        startDate: override.startDate || prev.startDate,
+        endDate: override.endDate || prev.endDate,
+        isHalfDay: Boolean(override.isHalfDay),
+        halfDayType: override.halfDayType || 'MORNING',
+        handoverNotes: override.handoverNotes || '',
+        handoverEmployeeId: override.handoverEmployeeId || '',
+        evidenceDocumentId: override.evidenceDocumentId || '',
+        evidenceFileName: override.evidenceFileName || '',
+        editingRequestId: override.editingRequestId || null,
+        linkedAbsenceId: override.linkedAbsenceId || null,
+        targetEmployeeId: override.targetEmployeeId || '',
+      }));
+      setLeaveModalOpen(true);
+      return;
+    }
+
     const targetEmployeeId = currentUser?.employeeId || employees[0]?.id;
     const overlaps = findOverlappingLeaveRequests(
       leaveRequests,
@@ -286,38 +316,82 @@ export default function App() {
       leaveForm.startDate,
       leaveForm.endDate
     );
-    if (overlaps.length > 0) {
-      const nextWindow = getNextAvailableLeaveWindow(
-        leaveRequests,
-        targetEmployeeId,
-        leaveForm.startDate
-      );
-      setLeaveForm((prev) => ({
-        ...prev,
-        startDate: nextWindow.startDate,
-        endDate: nextWindow.endDate,
-      }));
-    }
+    const nextWindow =
+      overlaps.length > 0
+        ? getNextAvailableLeaveWindow(leaveRequests, targetEmployeeId, leaveForm.startDate)
+        : null;
+    setLeaveForm((prev) => ({
+      ...prev,
+      ...(nextWindow ? { startDate: nextWindow.startDate, endDate: nextWindow.endDate } : {}),
+      isHalfDay: false,
+      halfDayType: 'MORNING',
+      evidenceDocumentId: '',
+      evidenceFileName: '',
+      editingRequestId: null,
+      linkedAbsenceId: null,
+      targetEmployeeId: '',
+    }));
     setLeaveModalOpen(true);
   };
 
   const handleSubmitLeave = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     try {
-      const targetEmployeeId = currentUser?.employeeId || employees[0]?.id;
+      const targetEmployeeId =
+        leaveForm.targetEmployeeId || currentUser?.employeeId || employees[0]?.id;
       const fallbackColleague = employees.find((emp) => emp.id !== targetEmployeeId)?.id;
-      await apiPost('/api/v1/leave/requests', {
-        ...(targetEmployeeId ? { employeeId: targetEmployeeId } : {}),
-        leaveTypeCode: leaveForm.leaveTypeCode || 'ANNUAL',
-        startDate: leaveForm.startDate,
-        endDate: leaveForm.endDate,
-        reason: leaveForm.handoverNotes || 'Leave application via portal',
-        handoverNotes: leaveForm.handoverNotes || undefined,
-        handoverEmployeeId: leaveForm.handoverEmployeeId || fallbackColleague || undefined,
-        replaceOverlapping: true,
-      });
-      setLeaveModalOpen(false);
-      showToast('Leave request submitted successfully.');
+      const isSingleDay = leaveForm.startDate === leaveForm.endDate;
+      const effectiveHalfDay = Boolean(leaveForm.isHalfDay && isSingleDay);
+
+      if (leaveForm.editingRequestId) {
+        await apiPost(`/api/v1/leave/requests/${leaveForm.editingRequestId}/resubmit`, {
+          startDate: leaveForm.startDate,
+          endDate: leaveForm.endDate,
+          isHalfDay: effectiveHalfDay,
+          halfDayType: effectiveHalfDay ? leaveForm.halfDayType || 'MORNING' : null,
+          reason: leaveForm.handoverNotes || 'Revised leave application via portal',
+          handoverNotes: leaveForm.handoverNotes || undefined,
+          handoverEmployeeId: leaveForm.handoverEmployeeId || fallbackColleague || undefined,
+          ...(leaveForm.evidenceDocumentId
+            ? { evidenceDocumentId: leaveForm.evidenceDocumentId }
+            : {}),
+        });
+        setLeaveModalOpen(false);
+        showToast('Leave request revised and resubmitted.');
+      } else {
+        const submitted = await apiPost('/api/v1/leave/requests', {
+          ...(targetEmployeeId ? { employeeId: targetEmployeeId } : {}),
+          leaveTypeCode: leaveForm.leaveTypeCode || 'ANNUAL',
+          startDate: leaveForm.startDate,
+          endDate: leaveForm.endDate,
+          isHalfDay: effectiveHalfDay,
+          halfDayType: effectiveHalfDay ? leaveForm.halfDayType || 'MORNING' : null,
+          reason: leaveForm.handoverNotes || 'Leave application via portal',
+          handoverNotes: leaveForm.handoverNotes || undefined,
+          handoverEmployeeId: leaveForm.handoverEmployeeId || fallbackColleague || undefined,
+          ...(leaveForm.evidenceDocumentId
+            ? { evidenceDocumentId: leaveForm.evidenceDocumentId }
+            : {}),
+          ...(leaveForm.linkedAbsenceId
+            ? {
+                isRetrospective: true,
+                retrospectiveReason: leaveForm.handoverNotes || 'Converted from unexpected absence',
+              }
+            : {}),
+          replaceOverlapping: true,
+        });
+
+        if (leaveForm.linkedAbsenceId && submitted?.request?.id) {
+          await apiPost(`/api/v1/absences/${leaveForm.linkedAbsenceId}/review`, {
+            status: 'RETROSPECTIVE_LEAVE_REQUESTED',
+            linkedLeaveRequestId: submitted.request.id,
+            notes: `Linked to ${submitted.request.requestNumber}`,
+          }).catch(() => {});
+        }
+        setLeaveModalOpen(false);
+        showToast('Leave request submitted successfully.');
+      }
+
       const nextWindow = getNextAvailableLeaveWindow(
         [
           ...leaveRequests,
@@ -335,7 +409,14 @@ export default function App() {
         ...prev,
         startDate: nextWindow.startDate,
         endDate: nextWindow.endDate,
+        isHalfDay: false,
+        halfDayType: 'MORNING',
         handoverNotes: '',
+        evidenceDocumentId: '',
+        evidenceFileName: '',
+        editingRequestId: null,
+        linkedAbsenceId: null,
+        targetEmployeeId: '',
       }));
       await fetchAllData();
     } catch (err) {
@@ -343,13 +424,21 @@ export default function App() {
     }
   };
 
-  const handleReviewLeave = async (id, decision) => {
+  const handleReviewLeave = async (id, decision, customComments = '') => {
     try {
+      const defaultComments =
+        decision === 'APPROVE'
+          ? 'Approved via portal'
+          : decision === 'RETURN'
+          ? 'Returned for updates via portal'
+          : 'Rejected via portal';
       await apiPost(`/api/v1/leave/requests/${id}/review`, {
         decision,
-        comments: decision === 'APPROVE' ? 'Approved via portal' : 'Returned/rejected via portal',
+        comments: (customComments || '').trim().length >= 3 ? customComments.trim() : defaultComments,
       });
-      showToast(`Leave request ${decision.toLowerCase()}d.`);
+      const verb =
+        decision === 'APPROVE' ? 'approved' : decision === 'RETURN' ? 'returned' : 'rejected';
+      showToast(`Leave request ${verb}.`);
       await fetchAllData();
     } catch (err) {
       showToast(err?.message || 'Unable to review leave request', 'error');
@@ -663,8 +752,9 @@ export default function App() {
               employees={employees}
               onOpenLeaveModal={handleOpenLeaveModal}
               onOpenAbsenceModal={() => setAbsenceModalOpen(true)}
-              onApproveLeave={(id) => handleReviewLeave(id, 'APPROVE')}
-              onRejectLeave={(id) => handleReviewLeave(id, 'REJECT')}
+              onApproveLeave={(id, reason) => handleReviewLeave(id, 'APPROVE', reason)}
+              onRejectLeave={(id, reason) => handleReviewLeave(id, 'REJECT', reason)}
+              onReturnLeave={(id, reason) => handleReviewLeave(id, 'RETURN', reason)}
               onCreateHoliday={handleCreateHoliday}
               onRefreshAll={fetchAllData}
               onShowToast={showToast}
@@ -772,7 +862,8 @@ export default function App() {
         leaveRequests={leaveRequests}
         employees={employees}
         currentEmployeeId={currentUser?.employeeId}
-        targetEmployeeId={currentUser?.employeeId || employees[0]?.id}
+        targetEmployeeId={leaveForm.targetEmployeeId || currentUser?.employeeId || employees[0]?.id}
+        onShowToast={showToast}
       />
 
       <UnexpectedAbsenceModal
