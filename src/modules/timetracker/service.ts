@@ -203,24 +203,43 @@ export class TimeTrackerService {
       orderBy: [{ workDate: 'desc' }, { createdAt: 'desc' }],
     });
 
+    const empIds = Array.from(new Set(logs.map((l) => l.employeeId).filter(Boolean)));
+    const emps =
+      empIds.length > 0
+        ? await this.prisma.employee.findMany({
+            where: { id: { in: empIds } },
+            select: { id: true, firstName: true, lastName: true, employeeNumber: true },
+          })
+        : [];
+    const empMap = new Map(emps.map((e) => [e.id, e]));
+
     const filtered = filters.search
       ? logs.filter((l) => {
           const term = filters.search!.toLowerCase();
+          const emp = empMap.get(l.employeeId);
+          const empName = emp ? `${emp.firstName} ${emp.lastName} ${emp.employeeNumber}`.toLowerCase() : '';
           return (
             l.description.toLowerCase().includes(term) ||
             l.project.name.toLowerCase().includes(term) ||
             l.project.code.toLowerCase().includes(term) ||
-            (l.phase?.name.toLowerCase().includes(term) ?? false)
+            (l.phase?.name.toLowerCase().includes(term) ?? false) ||
+            empName.includes(term)
           );
         })
       : logs;
 
-    return filtered.map((l) => ({
-      ...l,
-      costRateSnap: canViewRates ? l.costRateSnap : null,
-      laborCostKes: canViewRates ? Number((l.hours * l.costRateSnap).toFixed(2)) : null,
-      billingValueKes: l.isBillable ? Number((l.hours * l.billingRateSnap).toFixed(2)) : 0,
-    }));
+    return filtered.map((l) => {
+      const emp = empMap.get(l.employeeId);
+      const employeeName = emp ? `${emp.firstName} ${emp.lastName}`.trim() : null;
+      return {
+        ...l,
+        employeeName,
+        employeeNumber: emp?.employeeNumber || null,
+        costRateSnap: canViewRates ? l.costRateSnap : null,
+        laborCostKes: canViewRates ? Number((l.hours * l.costRateSnap).toFixed(2)) : null,
+        billingValueKes: l.isBillable ? Number((l.hours * l.billingRateSnap).toFixed(2)) : 0,
+      };
+    });
   }
 
   public async listClients() {

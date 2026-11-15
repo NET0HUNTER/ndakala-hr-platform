@@ -10,6 +10,8 @@ describe('Ndakala Unified Timesheet & Resource Profitability Suite (ND-RUN-2026-
 
   beforeAll(async () => {
     await seedDatabase(prisma);
+    await prisma.timeLog.deleteMany({ where: { workDate: '2026-12-10' } });
+    await prisma.timePeriodClose.deleteMany({ where: { name: 'December 2026 Test Close' } });
   });
 
   it('calculates exact Monday-Friday capacity hours and utilization %', () => {
@@ -178,5 +180,17 @@ describe('Ndakala Unified Timesheet & Resource Profitability Suite (ND-RUN-2026-
       .send({ reason: 'Audit adjustment requested by Managing Partner' });
     expect(okReopen.status).toBe(200);
     expect(okReopen.body.data.status).toBe('OPEN');
+  });
+
+  it('enriches time logs with staff names and masks labor cost rates for non-finance employees', async () => {
+    const emp = await loginClient(app, 'employee.one@ndakalaadvisory.co.ke');
+    const logsRes = await emp.agent.get('/api/v1/timetracker/logs');
+    expect(logsRes.status).toBe(200);
+    expect(Array.isArray(logsRes.body.data)).toBe(true);
+    if (logsRes.body.data.length > 0) {
+      expect(logsRes.body.data[0].employeeName).toBeDefined();
+      expect(logsRes.body.data[0].costRateSnap).toBeNull();
+      expect(logsRes.body.data[0].laborCostKes).toBeNull();
+    }
   });
 });

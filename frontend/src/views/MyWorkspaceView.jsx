@@ -1900,12 +1900,23 @@ export default function MyWorkspaceView({
                           {punches.length === 0 ? (
                             <p className="text-slate-500">Use Check-In in the left profile card or open Attendance to view shift logs.</p>
                           ) : (
-                            punches.slice(0, 5).map((p, idx) => (
-                              <div key={p.id || idx} className="p-2.5 border border-slate-200 rounded flex justify-between">
-                                <span className="font-medium text-slate-700">{p.punchType || p.type || 'PUNCH'}</span>
-                                <span className="text-slate-500">{p.punchedAt ? new Date(p.punchedAt).toLocaleString() : p.date || ''}</span>
-                              </div>
-                            ))
+                            punches.slice(0, 5).map((p, idx) => {
+                              const secs = Number(p.totalSecs || 0);
+                              const dur = secs > 0 ? `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m` : p.clockOutAt ? '0h 0m' : 'Active';
+                              return (
+                                <div key={p.id || idx} className="p-2.5 border border-slate-200 rounded flex justify-between items-center">
+                                  <div>
+                                    <span className="font-mono font-medium text-slate-800">{p.workDate}</span>
+                                    <span className="text-slate-500 ml-2">
+                                      {p.clockInAt ? new Date(p.clockInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                      {' → '}
+                                      {p.clockOutAt ? new Date(p.clockOutAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Checked In'}
+                                    </span>
+                                  </div>
+                                  <span className={`font-mono text-[11px] font-semibold ${p.clockOutAt ? 'text-slate-600' : 'text-emerald-600'}`}>{dur}</span>
+                                </div>
+                              );
+                            })
                           )}
                         </div>
                       ) : (

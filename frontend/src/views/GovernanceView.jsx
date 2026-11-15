@@ -383,6 +383,14 @@ export default function GovernanceView({
     if (filterClientId && tl.project?.clientId !== filterClientId) return false;
     if (filterBillable === 'Billable' && !tl.isBillable) return false;
     if (filterBillable === 'Non-billable' && tl.isBillable) return false;
+    if (filterPeriod === 'This Week') {
+      const startIso = baseStart.toISOString().slice(0, 10);
+      const endIso = baseEnd.toISOString().slice(0, 10);
+      if (tl.workDate < startIso || tl.workDate > endIso) return false;
+    } else if (filterPeriod === 'This Month') {
+      const monthPrefix = new Date().toISOString().slice(0, 7);
+      if (!String(tl.workDate || '').startsWith(monthPrefix)) return false;
+    }
     return true;
   });
 
@@ -1038,16 +1046,18 @@ export default function GovernanceView({
                             </button>
                           ))}
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setProjectDropdownOpen(false);
-                          setQuickProjectModal(true);
-                        }}
-                        className="w-full mt-1 pt-1.5 border-t border-slate-100 text-center text-[#0088ff] font-medium"
-                      >
-                        + Add Project
-                      </button>
+                      {currentUser?.permissions?.includes('timetracker.projects.manage') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setProjectDropdownOpen(false);
+                            setQuickProjectModal(true);
+                          }}
+                          className="w-full mt-1 pt-1.5 border-t border-slate-100 text-center text-[#0088ff] font-medium"
+                        >
+                          + Add Project
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1089,16 +1099,18 @@ export default function GovernanceView({
                             {ph.name}
                           </button>
                         ))}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setJobDropdownOpen(false);
-                          setQuickPhaseModal(true);
-                        }}
-                        className="w-full mt-1 pt-1.5 border-t border-slate-100 text-center text-[#0088ff] font-medium"
-                      >
-                        + Add Job / Phase
-                      </button>
+                      {currentUser?.permissions?.includes('timetracker.projects.manage') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setJobDropdownOpen(false);
+                            setQuickPhaseModal(true);
+                          }}
+                          className="w-full mt-1 pt-1.5 border-t border-slate-100 text-center text-[#0088ff] font-medium"
+                        >
+                          + Add Job / Phase
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

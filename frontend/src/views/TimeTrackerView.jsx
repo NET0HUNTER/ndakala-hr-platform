@@ -36,6 +36,13 @@ const healthBadgeClass = (status) => {
 export default function TimeTrackerView({ currentUser, employees = [], onShowToast, initialSubTab = 'logs' }) {
   const [subTab, setSubTab] = useState(initialSubTab); // logs | approvals | projects | rates | periods | analytics
 
+  const perms = new Set(currentUser?.permissions || []);
+  const canApprove = perms.has('timetracker.approve');
+  const canViewRates = perms.has('timetracker.rates.view');
+  const canManageRates = perms.has('timetracker.rates.manage');
+  const canManageProjects = perms.has('timetracker.projects.manage');
+  const canManagePeriods = perms.has('timetracker.periods.manage');
+
   useEffect(() => {
     if (initialSubTab) setSubTab(initialSubTab);
   }, [initialSubTab]);
@@ -63,7 +70,7 @@ export default function TimeTrackerView({ currentUser, employees = [], onShowToa
   const [logForm, setLogForm] = useState({
     projectId: '',
     phaseId: '',
-    workDate: '2026-11-13',
+    workDate: new Date().toISOString().slice(0, 10),
     hours: '2',
     isBillable: true,
     description: '',
@@ -505,7 +512,7 @@ export default function TimeTrackerView({ currentUser, employees = [], onShowToa
                 <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="px-2 py-1 border border-slate-300 rounded bg-white" />
               </div>
 
-              {selectedLogIds.length > 0 && (
+              {canApprove && selectedLogIds.length > 0 && (
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
@@ -536,18 +543,21 @@ export default function TimeTrackerView({ currentUser, employees = [], onShowToa
               <table className="w-full text-left border-collapse">
                 <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
                   <tr>
-                    <th className="py-2.5 px-3 w-8">
-                      <input
-                        type="checkbox"
-                        checked={logs.length > 0 && selectedLogIds.length === logs.filter((l) => l.status === 'PENDING').length}
-                        onChange={(e) =>
-                          setSelectedLogIds(
-                            e.target.checked ? logs.filter((l) => l.status === 'PENDING').map((l) => l.id) : []
-                          )
-                        }
-                      />
-                    </th>
+                    {canApprove && (
+                      <th className="py-2.5 px-3 w-8">
+                        <input
+                          type="checkbox"
+                          checked={logs.filter((l) => l.status === 'PENDING').length > 0 && selectedLogIds.length === logs.filter((l) => l.status === 'PENDING').length}
+                          onChange={(e) =>
+                            setSelectedLogIds(
+                              e.target.checked ? logs.filter((l) => l.status === 'PENDING').map((l) => l.id) : []
+                            )
+                          }
+                        />
+                      </th>
+                    )}
                     <th className="py-2.5 px-3">Date</th>
+                    <th className="py-2.5 px-3">Staff</th>
                     <th className="py-2.5 px-3">Project / Phase</th>
                     <th className="py-2.5 px-3">Description</th>
                     <th className="py-2.5 px-3">Hours</th>
@@ -560,25 +570,33 @@ export default function TimeTrackerView({ currentUser, employees = [], onShowToa
                 <tbody className="divide-y divide-slate-100">
                   {(subTab === 'approvals' ? logs.filter((l) => l.status === 'PENDING') : logs).map((log) => (
                     <tr key={log.id} className="hover:bg-slate-50">
-                      <td className="py-2.5 px-3">
-                        {log.status === 'PENDING' && (
-                          <input
-                            type="checkbox"
-                            checked={selectedLogIds.includes(log.id)}
-                            onChange={(e) =>
-                              setSelectedLogIds((prev) =>
-                                e.target.checked ? [...prev, log.id] : prev.filter((id) => id !== log.id)
-                              )
-                            }
-                          />
-                        )}
-                      </td>
+                      {canApprove && (
+                        <td className="py-2.5 px-3">
+                          {log.status === 'PENDING' && (
+                            <input
+                              type="checkbox"
+                              checked={selectedLogIds.includes(log.id)}
+                              onChange={(e) =>
+                                setSelectedLogIds((prev) =>
+                                  e.target.checked ? [...prev, log.id] : prev.filter((id) => id !== log.id)
+                                )
+                              }
+                            />
+                          )}
+                        </td>
+                      )}
                       <td className="py-2.5 px-3 font-mono text-slate-700">{log.workDate}</td>
+                      <td className="py-2.5 px-3 text-slate-700 font-medium">{log.employeeName || 'Staff'}</td>
                       <td className="py-2.5 px-3">
                         <div className="font-semibold text-slate-800">{log.project?.code} {log.project?.name}</div>
                         <div className="text-[11px] text-slate-400">{log.phase?.name || 'General Advisory'}</div>
                       </td>
-                      <td className="py-2.5 px-3 text-slate-700 max-w-xs truncate">{log.description}</td>
+                      <td className="py-2.5 px-3 text-slate-700 max-w-xs">
+                        <div className="truncate">{log.description}</div>
+                        {log.status === 'REJECTED' && log.rejectionReason && (
+                          <div className="text-[10px] text-rose-600 truncate">Reason: {log.rejectionReason}</div>
+                        )}
+                      </td>
                       <td className="py-2.5 px-3 font-mono font-bold text-slate-900">{Number(log.hours).toFixed(2)}h</td>
                       <td className="py-2.5 px-3">
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${log.isBillable ? 'bg-blue-50 text-[#0088ff]' : 'bg-slate-100 text-slate-500'}`}>
@@ -586,7 +604,9 @@ export default function TimeTrackerView({ currentUser, employees = [], onShowToa
                         </span>
                       </td>
                       <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600">
-                        {log.billingRateSnap != null ? fmtKes(Number(log.hours) * Number(log.billingRateSnap)) : 'Restricted (RBAC)'}
+                        {canViewRates && log.billingRateSnap != null
+                          ? fmtKes(Number(log.hours) * Number(log.billingRateSnap))
+                          : 'Restricted (RBAC)'}
                       </td>
                       <td className="py-2.5 px-3">
                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -598,7 +618,46 @@ export default function TimeTrackerView({ currentUser, employees = [], onShowToa
                           {log.status}
                         </span>
                       </td>
-                      <td className="py-2.5 px-3 text-right">
+                      <td className="py-2.5 px-3 text-right space-x-2 whitespace-nowrap">
+                        {canApprove && log.status === 'PENDING' && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await apiPatch('/api/v1/timetracker/logs/review', { logIds: [log.id], action: 'APPROVE' });
+                                  onShowToast?.('Time log approved.');
+                                  await loadAll();
+                                } catch (err) {
+                                  onShowToast?.(err.message || 'Approve failed', 'error');
+                                }
+                              }}
+                              className="text-emerald-700 hover:underline font-semibold"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const reason = (rejectionReason || '').trim() || 'Clarify deliverable & phase allocation';
+                                try {
+                                  await apiPatch('/api/v1/timetracker/logs/review', {
+                                    logIds: [log.id],
+                                    action: 'REJECT',
+                                    rejectionReason: reason,
+                                  });
+                                  onShowToast?.('Time log rejected.');
+                                  await loadAll();
+                                } catch (err) {
+                                  onShowToast?.(err.message || 'Reject failed', 'error');
+                                }
+                              }}
+                              className="text-amber-700 hover:underline font-semibold"
+                            >
+                              Reject
+                            </button>
+                          </>
+                        )}
                         {log.status === 'PENDING' && (
                           <button
                             type="button"
@@ -611,10 +670,10 @@ export default function TimeTrackerView({ currentUser, employees = [], onShowToa
                       </td>
                     </tr>
                   ))}
-                  {logs.length === 0 && (
+                  {(subTab === 'approvals' ? logs.filter((l) => l.status === 'PENDING') : logs).length === 0 && (
                     <tr>
-                      <td colSpan={9} className="py-8 text-center text-slate-400">
-                        No time logs matched current filters.
+                      <td colSpan={canApprove ? 10 : 9} className="py-8 text-center text-slate-400">
+                        {subTab === 'approvals' ? 'No pending time logs in approvals queue.' : 'No time logs matched current filters.'}
                       </td>
                     </tr>
                   )}
@@ -627,38 +686,48 @@ export default function TimeTrackerView({ currentUser, employees = [], onShowToa
         {/* TAB 3: CLIENTS, PROJECTS & GANTT PHASES */}
         {subTab === 'projects' && (
           <div className="space-y-4">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <form onSubmit={handleCreateClient} className="bg-white rounded-md border border-slate-200 p-4 space-y-3">
-                <h4 className="font-bold text-slate-800">Register Client Organization</h4>
-                <div className="grid grid-cols-2 gap-2">
-                  <input required placeholder="Code (e.g. CLI-004)" value={clientForm.code} onChange={(e) => setClientForm({ ...clientForm, code: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
-                  <input required placeholder="Client Name" value={clientForm.name} onChange={(e) => setClientForm({ ...clientForm, name: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
-                  <input placeholder="Industry" value={clientForm.industry} onChange={(e) => setClientForm({ ...clientForm, industry: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
-                  <input placeholder="Contact Email" value={clientForm.contactEmail} onChange={(e) => setClientForm({ ...clientForm, contactEmail: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
-                </div>
-                <button type="submit" className="px-3.5 py-1.5 bg-[#0088ff] text-white font-semibold rounded">Add Client</button>
-              </form>
+            {canManageProjects && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <form onSubmit={handleCreateClient} className="bg-white rounded-md border border-slate-200 p-4 space-y-3">
+                  <h4 className="font-bold text-slate-800">Register Client Organization</h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input required placeholder="Code (e.g. CLI-004)" value={clientForm.code} onChange={(e) => setClientForm({ ...clientForm, code: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                    <input required placeholder="Client Name" value={clientForm.name} onChange={(e) => setClientForm({ ...clientForm, name: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                    <input placeholder="Industry" value={clientForm.industry} onChange={(e) => setClientForm({ ...clientForm, industry: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                    <input placeholder="Contact Email" value={clientForm.contactEmail} onChange={(e) => setClientForm({ ...clientForm, contactEmail: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                  </div>
+                  <button type="submit" className="px-3.5 py-1.5 bg-[#0088ff] text-white font-semibold rounded">Add Client</button>
+                </form>
 
-              <form onSubmit={handleCreateProject} className="bg-white rounded-md border border-slate-200 p-4 space-y-3">
-                <h4 className="font-bold text-slate-800">Create Advisory Project & Budget</h4>
-                <div className="grid grid-cols-3 gap-2">
-                  <input required placeholder="PRJ Code" value={projectForm.code} onChange={(e) => setProjectForm({ ...projectForm, code: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
-                  <input required placeholder="Project Name" value={projectForm.name} onChange={(e) => setProjectForm({ ...projectForm, name: e.target.value })} className="col-span-2 px-2.5 py-1.5 border border-slate-300 rounded" />
-                  <select required value={projectForm.clientId} onChange={(e) => setProjectForm({ ...projectForm, clientId: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
-                    <option value="">Select Client</option>
-                    {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                  <select required value={projectForm.leadEmployeeId} onChange={(e) => setProjectForm({ ...projectForm, leadEmployeeId: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
-                    <option value="">Project Lead</option>
-                    {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
-                  </select>
-                  <input type="number" required placeholder="Budget (KES)" value={projectForm.budgetAmountKes} onChange={(e) => setProjectForm({ ...projectForm, budgetAmountKes: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
-                </div>
-                <button type="submit" className="px-3.5 py-1.5 bg-[#0088ff] text-white font-semibold rounded">Create Project</button>
-              </form>
-            </div>
+                <form onSubmit={handleCreateProject} className="bg-white rounded-md border border-slate-200 p-4 space-y-3">
+                  <h4 className="font-bold text-slate-800">Create Advisory Project & Budget</h4>
+                  <div className="grid grid-cols-3 gap-2">
+                    <input required placeholder="PRJ Code" value={projectForm.code} onChange={(e) => setProjectForm({ ...projectForm, code: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                    <input required placeholder="Project Name" value={projectForm.name} onChange={(e) => setProjectForm({ ...projectForm, name: e.target.value })} className="col-span-2 px-2.5 py-1.5 border border-slate-300 rounded" />
+                    <select required value={projectForm.clientId} onChange={(e) => setProjectForm({ ...projectForm, clientId: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
+                      <option value="">Select Client</option>
+                      {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                    <select required value={projectForm.leadEmployeeId} onChange={(e) => setProjectForm({ ...projectForm, leadEmployeeId: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
+                      <option value="">Project Lead</option>
+                      {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+                    </select>
+                    <input type="number" required placeholder="Budget (KES)" value={projectForm.budgetAmountKes} onChange={(e) => setProjectForm({ ...projectForm, budgetAmountKes: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                  </div>
+                  <button type="submit" className="px-3.5 py-1.5 bg-[#0088ff] text-white font-semibold rounded">Create Project</button>
+                </form>
+              </div>
+            )}
 
-            {projects.map((prj) => (
+            {projects.length === 0 && (
+              <div className="bg-white rounded-md border border-slate-200 p-8 text-center text-slate-400">
+                No advisory projects created yet.
+              </div>
+            )}
+
+            {projects.map((prj) => {
+              const health = prj.metrics?.health || prj.health;
+              return (
               <div key={prj.id} className="bg-white rounded-md border border-slate-200 p-4 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
                   <div>
@@ -667,10 +736,11 @@ export default function TimeTrackerView({ currentUser, employees = [], onShowToa
                     <span className="text-slate-400 ml-2">({prj.client?.name}) • {prj.startDate} → {prj.endDate}</span>
                   </div>
                   <div className="flex items-center gap-2">
+                    <span className="font-mono text-slate-500">{prj.metrics?.totalHours || 0}h ({prj.metrics?.billabilityPct || 0}% billable)</span>
                     <span className="font-mono font-semibold text-slate-700">Budget: {fmtKes(prj.budgetAmountKes)}</span>
-                    {prj.health && (
-                      <span className={`px-2.5 py-0.5 rounded-full border text-[11px] font-bold ${healthBadgeClass(prj.health.status)}`}>
-                        {prj.health.label} ({prj.health.burnPct}%)
+                    {health && (
+                      <span className={`px-2.5 py-0.5 rounded-full border text-[11px] font-bold ${healthBadgeClass(health.status)}`}>
+                        {health.label} ({health.burnPct}%)
                       </span>
                     )}
                   </div>
@@ -688,40 +758,47 @@ export default function TimeTrackerView({ currentUser, employees = [], onShowToa
                         </div>
                       </div>
                       <div className="col-span-2 flex items-center justify-end gap-1">
-                        <input
-                          key={`${ph.id}-${ph.progressPct}`}
-                          type="number"
-                          min="0"
-                          max="100"
-                          defaultValue={ph.progressPct}
-                          onBlur={(e) => {
-                            const val = Number(e.target.value);
-                            if (val !== ph.progressPct) handleUpdatePhaseProgress(ph.id, val);
-                          }}
-                          className="w-14 px-1.5 py-0.5 border border-slate-300 rounded text-right font-mono"
-                        />
+                        {canManageProjects ? (
+                          <input
+                            key={`${ph.id}-${ph.progressPct}`}
+                            type="number"
+                            min="0"
+                            max="100"
+                            defaultValue={ph.progressPct}
+                            onBlur={(e) => {
+                              const val = Number(e.target.value);
+                              if (val !== ph.progressPct) handleUpdatePhaseProgress(ph.id, val);
+                            }}
+                            className="w-14 px-1.5 py-0.5 border border-slate-300 rounded text-right font-mono"
+                          />
+                        ) : (
+                          <span className="font-mono font-semibold text-slate-700">{ph.progressPct}</span>
+                        )}
                         <span>%</span>
                       </div>
                     </div>
                   ))}
-                  <div className="flex items-center gap-2 pt-1">
-                    <input
-                      placeholder="New phase name..."
-                      value={phaseForms[prj.id]?.name || ''}
-                      onChange={(e) => setPhaseForms({ ...phaseForms, [prj.id]: { ...(phaseForms[prj.id] || { startDate: prj.startDate, endDate: prj.endDate }), name: e.target.value } })}
-                      className="px-2.5 py-1 border border-slate-300 rounded flex-1 max-w-xs"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleAddPhase(prj.id)}
-                      className="px-3 py-1 bg-slate-800 text-white rounded font-medium"
-                    >
-                      + Add Gantt Phase
-                    </button>
-                  </div>
+                  {canManageProjects && (
+                    <div className="flex items-center gap-2 pt-1">
+                      <input
+                        placeholder="New phase name..."
+                        value={phaseForms[prj.id]?.name || ''}
+                        onChange={(e) => setPhaseForms({ ...phaseForms, [prj.id]: { ...(phaseForms[prj.id] || { startDate: prj.startDate, endDate: prj.endDate }), name: e.target.value } })}
+                        className="px-2.5 py-1 border border-slate-300 rounded flex-1 max-w-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleAddPhase(prj.id)}
+                        className="px-3 py-1 bg-slate-800 text-white rounded font-medium"
+                      >
+                        + Add Gantt Phase
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -734,16 +811,18 @@ export default function TimeTrackerView({ currentUser, employees = [], onShowToa
                 <p className="text-slate-500">Protected by RBAC (`timetracker.rates.view` / `timetracker.rates.manage`). Rates snapshot onto each new TimeLog.</p>
               </div>
             </div>
-            <form onSubmit={handleSaveRateCard} className="grid grid-cols-1 md:grid-cols-5 gap-3 bg-slate-50 p-3.5 rounded border border-slate-200">
-              <select required value={rateForm.employeeId} onChange={(e) => setRateForm({ ...rateForm, employeeId: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
-                <option value="">Select Employee...</option>
-                {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.firstName} {emp.lastName}</option>)}
-              </select>
-              <input type="number" min="0" required value={rateForm.costRateKes} onChange={(e) => setRateForm({ ...rateForm, costRateKes: e.target.value })} placeholder="Cost Rate KES/hr" className="px-2.5 py-1.5 border border-slate-300 rounded bg-white font-mono" />
-              <input type="number" min="0" required value={rateForm.billingRateKes} onChange={(e) => setRateForm({ ...rateForm, billingRateKes: e.target.value })} placeholder="Billing Rate KES/hr" className="px-2.5 py-1.5 border border-slate-300 rounded bg-white font-mono" />
-              <input type="date" value={rateForm.effectiveFrom} onChange={(e) => setRateForm({ ...rateForm, effectiveFrom: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white" />
-              <button type="submit" className="px-4 py-1.5 bg-[#0088ff] text-white font-semibold rounded">Save Rate Card</button>
-            </form>
+            {canManageRates && (
+              <form onSubmit={handleSaveRateCard} className="grid grid-cols-1 md:grid-cols-5 gap-3 bg-slate-50 p-3.5 rounded border border-slate-200">
+                <select required value={rateForm.employeeId} onChange={(e) => setRateForm({ ...rateForm, employeeId: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
+                  <option value="">Select Employee...</option>
+                  {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.firstName} {emp.lastName}</option>)}
+                </select>
+                <input type="number" min="0" required value={rateForm.costRateKes} onChange={(e) => setRateForm({ ...rateForm, costRateKes: e.target.value })} placeholder="Cost Rate KES/hr" className="px-2.5 py-1.5 border border-slate-300 rounded bg-white font-mono" />
+                <input type="number" min="0" required value={rateForm.billingRateKes} onChange={(e) => setRateForm({ ...rateForm, billingRateKes: e.target.value })} placeholder="Billing Rate KES/hr" className="px-2.5 py-1.5 border border-slate-300 rounded bg-white font-mono" />
+                <input type="date" value={rateForm.effectiveFrom} onChange={(e) => setRateForm({ ...rateForm, effectiveFrom: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white" />
+                <button type="submit" className="px-4 py-1.5 bg-[#0088ff] text-white font-semibold rounded">Save Rate Card</button>
+              </form>
+            )}
 
             <table className="w-full text-left border-collapse">
               <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
@@ -770,7 +849,7 @@ export default function TimeTrackerView({ currentUser, employees = [], onShowToa
                   );
                 })}
                 {rates.length === 0 && (
-                  <tr><td colSpan={5} className="py-6 text-center text-slate-400">No rate cards visible for current role permissions.</td></tr>
+                  <tr><td colSpan={5} className="py-6 text-center text-slate-400">{canViewRates ? 'No rate cards configured yet.' : 'Restricted (RBAC): Cost & billing rates are hidden for this role.'}</td></tr>
                 )}
               </tbody>
             </table>
@@ -780,31 +859,37 @@ export default function TimeTrackerView({ currentUser, employees = [], onShowToa
         {/* TAB 5: MONTH-END PERIOD CLOSE & SHA-256 LOCK */}
         {subTab === 'periods' && (
           <div className="space-y-4">
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                try {
-                  await apiPost('/api/v1/timetracker/periods', newPeriodForm);
-                  onShowToast?.('Financial time period opened.');
-                  await loadAll();
-                } catch (err) {
-                  onShowToast?.(err.message || 'Could not open period', 'error');
-                }
-              }}
-              className="bg-white rounded-md border border-slate-200 p-4 flex flex-wrap items-center gap-3"
-            >
-              <span className="font-bold text-slate-800">Open Period:</span>
-              <input required value={newPeriodForm.name} onChange={(e) => setNewPeriodForm({ ...newPeriodForm, name: e.target.value })} placeholder="Period Name" className="px-2.5 py-1.5 border border-slate-300 rounded" />
-              <input type="date" required value={newPeriodForm.startDate} onChange={(e) => setNewPeriodForm({ ...newPeriodForm, startDate: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
-              <input type="date" required value={newPeriodForm.endDate} onChange={(e) => setNewPeriodForm({ ...newPeriodForm, endDate: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
-              <button type="submit" className="px-4 py-1.5 bg-[#0088ff] text-white font-semibold rounded">Open Period</button>
-              <input
-                value={reopenReason}
-                onChange={(e) => setReopenReason(e.target.value)}
-                placeholder="Mandatory audit reason if reopening..."
-                className="flex-1 min-w-[200px] px-2.5 py-1.5 border border-slate-300 rounded"
-              />
-            </form>
+            {canManagePeriods ? (
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  try {
+                    await apiPost('/api/v1/timetracker/periods', newPeriodForm);
+                    onShowToast?.('Financial time period opened.');
+                    await loadAll();
+                  } catch (err) {
+                    onShowToast?.(err.message || 'Could not open period', 'error');
+                  }
+                }}
+                className="bg-white rounded-md border border-slate-200 p-4 flex flex-wrap items-center gap-3"
+              >
+                <span className="font-bold text-slate-800">Open Period:</span>
+                <input required value={newPeriodForm.name} onChange={(e) => setNewPeriodForm({ ...newPeriodForm, name: e.target.value })} placeholder="Period Name" className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                <input type="date" required value={newPeriodForm.startDate} onChange={(e) => setNewPeriodForm({ ...newPeriodForm, startDate: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                <input type="date" required value={newPeriodForm.endDate} onChange={(e) => setNewPeriodForm({ ...newPeriodForm, endDate: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                <button type="submit" className="px-4 py-1.5 bg-[#0088ff] text-white font-semibold rounded">Open Period</button>
+                <input
+                  value={reopenReason}
+                  onChange={(e) => setReopenReason(e.target.value)}
+                  placeholder="Mandatory audit reason if reopening..."
+                  className="flex-1 min-w-[200px] px-2.5 py-1.5 border border-slate-300 rounded"
+                />
+              </form>
+            ) : (
+              <div className="bg-white rounded-md border border-slate-200 p-4 text-slate-500">
+                Period Close & Lock controls require Finance / Partner period management permission (`timetracker.periods.manage`).
+              </div>
+            )}
 
             <div className="grid grid-cols-1 gap-3">
               {periods.map((per) => (
@@ -817,29 +902,35 @@ export default function TimeTrackerView({ currentUser, employees = [], onShowToa
                         {per.status}
                       </span>
                     </div>
-                    <p className="text-slate-500 mt-0.5 font-mono">{per.startDate} → {per.endDate}</p>
+                    <p className="text-slate-500 mt-0.5 font-mono">
+                      {per.startDate} → {per.endDate}
+                      {per.status !== 'LOCKED' && ` • ${per.unapprovedCount || 0} pending logs`}
+                    </p>
                     {per.snapshotChecksum && (
                       <p className="text-[11px] font-mono text-slate-500 mt-1 break-all">
                         SHA-256 Digest: <span className="text-slate-800 font-semibold">{per.snapshotChecksum}</span>
+                        {per.snapshot ? ` • ${per.snapshot.entriesLocked} logs • ${per.snapshot.kpis?.billabilityPct || 0}% billable` : ''}
                       </p>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
-                    {per.status === 'OPEN' ? (
-                      <>
-                        <button type="button" onClick={() => handlePeriodAction(per.id, 'approve-all')} className="px-3 py-1.5 border border-slate-300 rounded font-semibold text-slate-700 hover:bg-slate-50">
-                          Approve All Logs
+                  {canManagePeriods && (
+                    <div className="flex items-center gap-2">
+                      {per.status === 'OPEN' ? (
+                        <>
+                          <button type="button" onClick={() => handlePeriodAction(per.id, 'approve-all')} className="px-3 py-1.5 border border-slate-300 rounded font-semibold text-slate-700 hover:bg-slate-50">
+                            Approve All Logs
+                          </button>
+                          <button type="button" onClick={() => handlePeriodAction(per.id, 'close', true)} className="px-3.5 py-1.5 bg-slate-900 text-white rounded font-semibold hover:bg-slate-800">
+                            Close & SHA-256 Lock Period
+                          </button>
+                        </>
+                      ) : (
+                        <button type="button" onClick={() => handlePeriodAction(per.id, 'reopen')} className="px-3 py-1.5 bg-amber-600 text-white rounded font-semibold hover:bg-amber-700">
+                          Reopen Period (Audit Reason)
                         </button>
-                        <button type="button" onClick={() => handlePeriodAction(per.id, 'close', true)} className="px-3.5 py-1.5 bg-slate-900 text-white rounded font-semibold hover:bg-slate-800">
-                          Close & SHA-256 Lock Period
-                        </button>
-                      </>
-                    ) : (
-                      <button type="button" onClick={() => handlePeriodAction(per.id, 'reopen')} className="px-3 py-1.5 bg-amber-600 text-white rounded font-semibold hover:bg-amber-700">
-                        Reopen Period (Audit Reason)
-                      </button>
-                    )}
-                  </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -853,10 +944,10 @@ export default function TimeTrackerView({ currentUser, employees = [], onShowToa
               {[
                 { label: 'Total Logged Hours', value: `${kpis.totalLoggedHours} hrs`, sub: `${kpis.billableHours}h billable` },
                 { label: 'Billability %', value: `${kpis.billabilityPct}%`, sub: 'Billable / Total' },
-                { label: 'Labor Cost (KES)', value: fmtKes(kpis.totalLaborCostKes), sub: 'Cost Rate × Hours' },
+                { label: 'Labor Cost (KES)', value: kpis.totalLaborCostKes != null ? fmtKes(kpis.totalLaborCostKes) : 'Restricted (RBAC)', sub: 'Cost Rate × Hours' },
                 { label: 'Billable Revenue', value: fmtKes(kpis.billableRevenueKes), sub: 'Billing Rate × Billable' },
                 { label: 'Non-Billable Leakage', value: fmtKes(kpis.nonBillableLeakageKes), sub: 'Foregone billing' },
-                { label: 'Gross Profit Margin %', value: `${kpis.grossProfitMarginPct}%`, sub: 'Rev - Cost / Rev' },
+                { label: 'Gross Profit Margin %', value: kpis.grossProfitMarginPct != null ? `${kpis.grossProfitMarginPct}%` : 'Restricted (RBAC)', sub: 'Rev - Cost / Rev' },
               ].map((card) => (
                 <div key={card.label} className="bg-white rounded-md border border-slate-200 p-3.5">
                   <p className="text-[11px] font-semibold text-slate-500">{card.label}</p>
@@ -906,7 +997,7 @@ export default function TimeTrackerView({ currentUser, employees = [], onShowToa
         <div><strong className="font-mono text-emerald-700">{Number(kpis.billableHours || 0).toFixed(2)}h</strong> <span className="text-slate-400 ml-1">Billable ({kpis.billabilityPct}%)</span></div>
         <div><strong className="font-mono text-amber-700">{Number(kpis.nonBillableHours || 0).toFixed(2)}h</strong> <span className="text-slate-400 ml-1">Non-Billable</span></div>
         <div><strong className="font-mono text-slate-800">{fmtKes(kpis.billableRevenueKes)}</strong> <span className="text-slate-400 ml-1">Billable Revenue</span></div>
-        <div><strong className="font-mono text-[#0088ff]">{kpis.grossProfitMarginPct}%</strong> <span className="text-slate-400 ml-1">Gross Margin</span></div>
+        <div><strong className="font-mono text-[#0088ff]">{kpis.grossProfitMarginPct != null ? `${kpis.grossProfitMarginPct}%` : 'Restricted'}</strong> <span className="text-slate-400 ml-1">Gross Margin</span></div>
       </div>
     </div>
   );
