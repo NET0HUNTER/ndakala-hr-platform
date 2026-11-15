@@ -1467,23 +1467,133 @@ export class PerformanceService {
   }
 
   // ---------------------------------------------------------------------------
-  // 8. Scoped Dashboards & Reports (Privacy-Safe)
+  // 8. Scoped Lists & Dashboards (Privacy-Safe)
   // ---------------------------------------------------------------------------
 
-  async getPerformanceDashboard(userId: string, userRoles: string[]) {
-    const isExecutive = userRoles.includes('managing_partner') || userRoles.includes('operations_director') || userRoles.includes('head_of_hr');
-    const scope = isExecutive ? 'ORGANISATION' : userRoles.includes('line_manager') ? 'MANAGER' : 'EMPLOYEE';
+  private async resolveScopedEmployeeWhere(userId: string, userRoles: string[]): Promise<{
+    scope: 'ORGANISATION' | 'MANAGER' | 'EMPLOYEE';
+    employeeWhere: any | null;
+    actorEmployeeId: string | null;
+  }> {
+    const isExecutive =
+      userRoles.includes('managing_partner') ||
+      userRoles.includes('operations_director') ||
+      userRoles.includes('head_of_hr');
+    if (isExecutive) {
+      const emp = await this.prisma.employee.findUnique({ where: { userId }, select: { id: true } });
+      return { scope: 'ORGANISATION', employeeWhere: {}, actorEmployeeId: emp?.id ?? null };
+    }
 
-    let employeeWhere: any = {};
-    if (!isExecutive) {
-      // Find employee record for current user
-      const emp = await this.prisma.employee.findUnique({ where: { userId } });
-      if (!emp) return { authorized: false, message: 'No employee record linked' };
-
-      // Line manager view: only direct/indirect reports
-      employeeWhere = {
-        OR: [{ managerId: emp.id }, { id: emp.id }],
+    const emp = await this.prisma.employee.findUnique({ where: { userId }, select: { id: true } });
+    if (!emp) {
+      return {
+        scope: userRoles.includes('line_manager') ? 'MANAGER' : 'EMPLOYEE',
+        employeeWhere: null,
+        actorEmployeeId: null,
       };
+    }
+
+    if (userRoles.includes('line_manager')) {
+      return {
+        scope: 'MANAGER',
+        employeeWhere: { OR: [{ managerId: emp.id }, { id: emp.id }] },
+        actorEmployeeId: emp.id,
+      };
+    }
+
+    return { scope: 'EMPLOYEE', employeeWhere: { id: emp.id }, actorEmployeeId: emp.id };
+  }
+
+  async listObjectiveSets(userId: string, userRoles: string[]) {
+    const { employeeWhere } = await this.resolveScopedEmployeeWhere(userId, userRoles);
+    if (!employeeWhere) return [];
+
+    return this.prisma.performanceObjectiveSet.findMany({
+      where: { employee: employeeWhere },
+      include: {
+        employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true, userId: true } },
+        cycle: { select: { id: true, title: true, cycleType: true } },
+        objectives: { orderBy: { orderIndex: 'asc' } },
+      },
+      orderBy: [{ createdAt: 'desc' }, { version: 'desc' }],
+    });
+  }
+
+  async listAppraisals(userId: string, userRoles: string[]) {
+    const { employeeWhere } = await this.resolveScopedEmployeeWhere(userId, userRoles);
+    if (!employeeWhere) return [];
+
+    return this.prisma.performanceAppraisal.findMany({
+      where: { employee: employeeWhere },
+      include: {
+        cycle: { select: { id: true, title: true, cycleType: true, status: true, annualFormulaStatus: true } },
+        employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true, userId: true } },
+        manager: { select: { id: true, firstName: true, lastName: true, employeeNumber: true, userId: true } },
+        peerFeedbacks: { select: { id: true, submittedAt: true } },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  async listPips(userId: string, userRoles: string[]) {
+    const { employeeWhere } = await this.resolveScopedEmployeeWhere(userId, userRoles);
+    if (!employeeWhere) return [];
+
+    return this.prisma.performanceImprovementPlan.findMany({
+      where: { employee: employeeWhere },
+      include: {
+        employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true, userId: true } },
+        checkIns: { orderBy: { checkInMonth: 'asc' } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async listDevelopmentActions(userId: string, userRoles: string[]) {
+    const { employeeWhere } = await this.resolveScopedEmployeeWhere(userId, userRoles);
+    if (!employeeWhere) return [];
+
+    return this.prisma.developmentAction.findMany({
+      where: { developmentPlan: { employee: employeeWhere } },
+      include: {
+        developmentPlan: {
+          select: {
+            id: true,
+            title: true,
+            employeeId: true,
+            appraisalId: true,
+            employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async listMyPeerFeedbackRequests(userId: string) {
+    const emp = await this.prisma.employee.findUnique({ where: { userId }, select: { id: true } });
+    if (!emp) return [];
+
+    return this.prisma.performancePeerFeedback.findMany({
+      where: { peerEmployeeId: emp.id },
+      include: {
+        appraisal: {
+          select: {
+            id: true,
+            status: true,
+            cycle: { select: { id: true, title: true } },
+            employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getPerformanceDashboard(userId: string, userRoles: string[]) {
+    const { scope, employeeWhere } = await this.resolveScopedEmployeeWhere(userId, userRoles);
+    if (!employeeWhere) {
+      return { authorized: false, message: 'No employee record linked' };
     }
 
     const activeCycle = await this.prisma.performanceCycle.findFirst({

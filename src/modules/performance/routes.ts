@@ -147,7 +147,16 @@ export function createPerformanceRouter(deps: AppDeps): Router {
     },
   });
 
-  // 4. Create Performance Objective Set
+  // 4. List & Create Performance Objective Sets
+  registerRoute(router, deps, {
+    method: 'get',
+    path: '/performance/objectives',
+    auth: 'session',
+    handler: async ({ auth }) => {
+      return service.listObjectiveSets(auth.userId, auth.roles);
+    },
+  });
+
   registerRoute(router, deps, {
     method: 'post',
     path: '/performance/objectives',
@@ -170,7 +179,18 @@ export function createPerformanceRouter(deps: AppDeps): Router {
       ).min(1),
     }),
     successStatus: 201,
-    handler: async ({ body, auth, req }) => {
+    handler: async ({ body, auth, req, deps }) => {
+      const canManageOthers =
+        auth.roles.includes('managing_partner') ||
+        auth.roles.includes('operations_director') ||
+        auth.roles.includes('head_of_hr') ||
+        auth.roles.includes('line_manager');
+      if (!canManageOthers) {
+        const actorEmp = await deps.prisma.employee.findUnique({ where: { userId: auth.userId }, select: { id: true } });
+        if (!actorEmp || actorEmp.id !== body.employeeId) {
+          throw forbidden('Employees may only create objective sets for their own profile.');
+        }
+      }
       return service.createObjectiveSet({
         ...body,
         userId: auth.userId,
@@ -256,7 +276,17 @@ export function createPerformanceRouter(deps: AppDeps): Router {
       ).optional(),
     }),
     successStatus: 201,
-    handler: async ({ body, auth, req }) => {
+    handler: async ({ body, auth, req, deps }) => {
+      const isExecutive =
+        auth.roles.includes('managing_partner') ||
+        auth.roles.includes('operations_director') ||
+        auth.roles.includes('head_of_hr');
+      if (!isExecutive) {
+        const actorEmp = await deps.prisma.employee.findUnique({ where: { userId: auth.userId }, select: { id: true } });
+        if (!actorEmp || actorEmp.id !== body.employeeId) {
+          throw forbidden('You can only submit a self-appraisal for your own employee record.');
+        }
+      }
       return service.submitSelfAppraisal({
         ...body,
         userId: auth.userId,
@@ -441,7 +471,25 @@ export function createPerformanceRouter(deps: AppDeps): Router {
     },
   });
 
+  registerRoute(router, deps, {
+    method: 'get',
+    path: '/performance/peer-feedback/pending',
+    auth: 'session',
+    handler: async ({ auth }) => {
+      return service.listMyPeerFeedbackRequests(auth.userId);
+    },
+  });
+
   // 15. Development Actions
+  registerRoute(router, deps, {
+    method: 'get',
+    path: '/performance/development/actions',
+    auth: { permission: 'development.view' },
+    handler: async ({ auth }) => {
+      return service.listDevelopmentActions(auth.userId, auth.roles);
+    },
+  });
+
   registerRoute(router, deps, {
     method: 'post',
     path: '/performance/development/actions',
@@ -604,8 +652,7 @@ export function createPerformanceRouter(deps: AppDeps): Router {
     path: '/performance/appraisals',
     auth: 'session',
     handler: async ({ auth }) => {
-      const dash = await service.getPerformanceDashboard(auth.userId, auth.roles);
-      return (dash as any).appraisals ?? [];
+      return service.listAppraisals(auth.userId, auth.roles);
     },
   });
 
@@ -614,8 +661,7 @@ export function createPerformanceRouter(deps: AppDeps): Router {
     path: '/performance/pips',
     auth: 'session',
     handler: async ({ auth }) => {
-      const dash = await service.getPerformanceDashboard(auth.userId, auth.roles);
-      return (dash as any).pips ?? [];
+      return service.listPips(auth.userId, auth.roles);
     },
   });
 

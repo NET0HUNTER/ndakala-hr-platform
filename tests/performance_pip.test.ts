@@ -1017,5 +1017,69 @@ describe('Performance, Objectives, Development and PIP (Phase 5)', () => {
       expect(res.body.data.scope).toBe('ORGANISATION');
       expect(res.body.data.activeCycle).toBeDefined();
     });
+
+    it('returns non-empty scoped operational lists for appraisals, objectives, pips, and development actions', async () => {
+      const [appRes, objRes, pipRes, devRes] = await Promise.all([
+        employeeClient.agent.get('/api/v1/performance/appraisals'),
+        employeeClient.agent.get('/api/v1/performance/objectives'),
+        employeeClient.agent.get('/api/v1/performance/pips'),
+        employeeClient.agent.get('/api/v1/performance/development/actions'),
+      ]);
+
+      expect(appRes.status).toBe(200);
+      expect(appRes.body.data.length).toBeGreaterThanOrEqual(1);
+      expect(appRes.body.data.every((a: any) => a.employeeId === employeeOneId)).toBe(true);
+
+      expect(objRes.status).toBe(200);
+      expect(objRes.body.data.length).toBeGreaterThanOrEqual(1);
+      expect(objRes.body.data.every((o: any) => o.employeeId === employeeOneId)).toBe(true);
+
+      expect(pipRes.status).toBe(200);
+      expect(pipRes.body.data.length).toBeGreaterThanOrEqual(1);
+      expect(pipRes.body.data[0].checkIns.length).toBeGreaterThanOrEqual(1);
+
+      expect(devRes.status).toBe(200);
+      expect(devRes.body.data.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('returns pending peer feedback requests scoped to the designated peer', async () => {
+      const res = await peerClient.agent.get('/api/v1/performance/peer-feedback/pending');
+      expect(res.status).toBe(200);
+      expect(res.body.data.length).toBeGreaterThanOrEqual(1);
+      expect(res.body.data[0].peerEmployeeId).toBe(peerEmpId);
+    });
+
+    it('blocks an employee from creating objectives or submitting self-appraisal for another employee', async () => {
+      const objRes = await employeeClient.agent
+        .post('/api/v1/performance/objectives')
+        .set('x-csrf-token', employeeClient.csrfToken)
+        .send({
+          employeeId: peerEmpId,
+          title: 'Unauthorized Target Sheet',
+          objectives: [
+            {
+              title: 'Sample',
+              kpi: 'Sample KPI',
+              behavioursAndValues: 'Integrity',
+              expectedDate: '2026-12-31',
+              weightPercent: 100,
+              isRealistic: true,
+            },
+          ],
+        });
+      expect(objRes.status).toBe(403);
+
+      const selfRes = await employeeClient.agent
+        .post('/api/v1/performance/appraisals/self')
+        .set('x-csrf-token', employeeClient.csrfToken)
+        .send({
+          cycleId: activeCycleId,
+          employeeId: peerEmpId,
+          selfAchievements: 'Attempting cross-employee self appraisal submission',
+          selfStrengths: ['Strength one', 'Strength two'],
+          selfImprovementAreas: ['Improvement one', 'Improvement two'],
+        });
+      expect(selfRes.status).toBe(403);
+    });
   });
 });

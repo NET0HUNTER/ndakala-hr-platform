@@ -52,14 +52,37 @@ export default function PerformanceView({
   onRefreshAll,
   onShowToast,
 }) {
-  const [opsSubTab, setOpsSubTab] = useState('appraisals'); // appraisals | cycles | pip | development
+  const permSet = new Set(currentUser?.permissions || []);
+  const canManageCycles = permSet.has('performance.cycle.manage');
+  const canApproveObjectives = permSet.has('objectives.approve');
+  const canManageTeamAppraisal = permSet.has('appraisal.manage_team');
+  const canModerateAppraisal = permSet.has('appraisal.moderate');
+  const canApproveAppraisal = permSet.has('appraisal.approve');
+  const canRequestPeerFeedback = permSet.has('peer_feedback.request');
+  const canSubmitPeerFeedback = permSet.has('peer_feedback.submit');
+  const canViewPerfReports = permSet.has('performance.reports.view');
+  const canInitiatePip = permSet.has('pip.initiate');
+  const canCheckInPip = permSet.has('pip.view_team');
+  const canDecidePip = permSet.has('pip.decide');
+  const canManageDev = permSet.has('development.manage');
+  const canEditPerfSettings =
+    permSet.has('config.create') || permSet.has('config.manage') || canManageCycles;
+  const actorEmployeeId = currentUser?.employeeId || '';
+
+  const [opsSubTab, setOpsSubTab] = useState('appraisals'); // appraisals | objectives | cycles | pip | development
   const [ratingScales, setRatingScales] = useState([]);
+  const [objectiveSets, setObjectiveSets] = useState([]);
+  const [devActions, setDevActions] = useState([]);
+  const [pendingPeerRequests, setPendingPeerRequests] = useState([]);
+  const [peerDrafts, setPeerDrafts] = useState({});
+  const [devEvidenceMap, setDevEvidenceMap] = useState({});
   const [selectedCycleId, setSelectedCycleId] = useState('');
   const [cycleMetrics, setCycleMetrics] = useState(null);
   const [formulaConfig, setFormulaConfig] = useState(null);
   const [formulaSimResult, setFormulaSimResult] = useState(null);
   const [selectedAppraisalDetail, setSelectedAppraisalDetail] = useState(null);
-  const [actionModal, setActionModal] = useState(null); // null | self | manager | meeting | moderate | peer | createCycle | createPip | createDev
+  const [actionModal, setActionModal] = useState(null); // null | self | manager | meeting | moderate | pipCheckIn | pipOutcome | pipRefuse
+  const [selectedPip, setSelectedPip] = useState(null);
 
   const [cycleForm, setCycleForm] = useState({
     title: 'Annual Performance Cycle 2026',
@@ -75,10 +98,10 @@ export default function PerformanceView({
   const [formulaForm, setFormulaForm] = useState({
     model: 'QUARTERLY_WEIGHTED',
     roundingMethod: 'TWO_DECIMALS',
-    q1: 20,
+    q1: 15,
     q2: 20,
     q3: 25,
-    q4: 35,
+    q4: 40,
   });
   const [selfForm, setSelfForm] = useState({
     cycleId: '',
@@ -104,14 +127,14 @@ export default function PerformanceView({
     developmentAgreement: 'Lead Q1 client walkthroughs and mentor junior associates.',
   });
   const [modForm, setModForm] = useState({
-    moderatedRatingCode: 4,
+    moderatedRatingCode: 5,
     moderationNotes: 'Calibrated across firm cohort distribution.',
   });
   const [peerReqEmpId, setPeerReqEmpId] = useState('');
   const [pipForm, setPipForm] = useState({
     employeeId: '',
     lineManagerId: '',
-    triggerReason: 'FIRST_TIME_RATING_2',
+    triggerReason: 'CAPABILITY_DEFICIT',
     durationMonths: 3,
     startDate: '2026-11-16',
     endDate: '2027-02-15',
@@ -120,12 +143,16 @@ export default function PerformanceView({
     targetMeasurement: 'Zero missed client deadlines over 30/60/90 days',
   });
   const [pipCheckInForm, setPipCheckInForm] = useState({
-    pipId: '',
     checkInMonth: 1,
     scheduledDate: '2026-12-15',
     managerReviewEvidence: 'Completed weekly checkpoints and improved SLA timeliness.',
     progressStatus: 'SATISFACTORY',
   });
+  const [pipOutcomeForm, setPipOutcomeForm] = useState({
+    outcomeRecommendation: 'CLEARANCE',
+    outcomeNotes: 'Employee met all SMART targets and demonstrated sustained capability improvement.',
+  });
+  const [pipRefusalReason, setPipRefusalReason] = useState('');
   const [devForm, setDevForm] = useState({
     employeeId: '',
     objective: 'Advanced CISA / Financial Advisory Certification',
@@ -134,6 +161,7 @@ export default function PerformanceView({
   });
   const [goalEmployeeId, setGoalEmployeeId] = useState('');
   const [goalCycleId, setGoalCycleId] = useState('');
+  const [goalSheetTitle, setGoalSheetTitle] = useState('2026 Performance Goal Sheet');
   const [lastCreatedObjSetId, setLastCreatedObjSetId] = useState('');
   // Getting Started 3-Step Carousel (08:55 - 09:48 of hr.webm)
   const [carouselStep, setCarouselStep] = useState(1);
@@ -277,7 +305,19 @@ export default function PerformanceView({
     if (onShowToast) onShowToast(msg, type);
   };
 
+  const loadPerfOperationalLists = React.useCallback(async () => {
+    const [objs, acts, peers] = await Promise.all([
+      apiGet('/api/v1/performance/objectives').then((r) => unwrapList(r)).catch(() => []),
+      apiGet('/api/v1/performance/development/actions').then((r) => unwrapList(r)).catch(() => []),
+      apiGet('/api/v1/performance/peer-feedback/pending').then((r) => unwrapList(r)).catch(() => []),
+    ]);
+    setObjectiveSets(objs);
+    setDevActions(acts);
+    setPendingPeerRequests(peers);
+  }, []);
+
   React.useEffect(() => {
+    loadPerfOperationalLists();
     apiGet('/api/v1/performance/rating-scales')
       .then((res) => setRatingScales(unwrapList(res)))
       .catch(() => null);
@@ -316,26 +356,40 @@ export default function PerformanceView({
         }
       })
       .catch(() => null);
-  }, []);
+  }, [loadPerfOperationalLists]);
 
   React.useEffect(() => {
-    if ((activeTab === 'okr' || subViewHint === 'objectives') && topContextTab === 'gettingstarted') {
-      setTopContextTab && setTopContextTab('appraisals');
+    if (activeTab === 'okr' || subViewHint === 'objectives') {
+      setOpsSubTab('objectives');
+      if (topContextTab === 'gettingstarted') {
+        setTopContextTab && setTopContextTab('appraisals');
+      }
     }
   }, [activeTab, subViewHint]);
 
   React.useEffect(() => {
     const cId = selectedCycleId || performanceCycles[0]?.id || '';
-    const empId = employees[0]?.id || '';
+    const defaultEmpId = actorEmployeeId || employees[0]?.id || '';
+    const defaultMgrId =
+      employees.find((em) => em.id !== defaultEmpId)?.id || defaultEmpId;
     if (cId && !selectedCycleId) setSelectedCycleId(cId);
-    setSelfForm((p) => ({ ...p, cycleId: p.cycleId || cId, employeeId: p.employeeId || empId }));
-    setPipForm((p) => ({ ...p, employeeId: p.employeeId || empId, lineManagerId: p.lineManagerId || employees[1]?.id || empId }));
-    setDevForm((p) => ({ ...p, employeeId: p.employeeId || empId }));
-    setGoalEmployeeId((p) => p || empId);
+    setSelfForm((p) => ({
+      ...p,
+      cycleId: p.cycleId || cId,
+      employeeId: p.employeeId || defaultEmpId,
+    }));
+    setPipForm((p) => ({
+      ...p,
+      employeeId: p.employeeId || employees[0]?.id || defaultEmpId,
+      lineManagerId: p.lineManagerId || defaultMgrId,
+    }));
+    setDevForm((p) => ({ ...p, employeeId: p.employeeId || defaultEmpId }));
+    setGoalEmployeeId((p) => p || defaultEmpId);
     setGoalCycleId((p) => p || cId);
-  }, [performanceCycles, employees]);
+  }, [performanceCycles, employees, actorEmployeeId]);
 
   const persistPerfSettings = async (override = {}) => {
+    if (!canEditPerfSettings) return;
     try {
       await apiPut('/api/v1/workspace/ui-config', {
         key: 'PERF_SETTINGS',
@@ -378,10 +432,24 @@ export default function PerformanceView({
   };
 
   const triggerSaved = (override) => {
+    if (!canEditPerfSettings) {
+      notify('Restricted (RBAC): Performance Settings require HR or Executive permission.', 'error');
+      return;
+    }
     setSavedIndicator(true);
     persistPerfSettings(override);
     setTimeout(() => setSavedIndicator(false), 1800);
   };
+
+  const refreshEverything = async () => {
+    await loadPerfOperationalLists();
+    if (onRefreshAll) await onRefreshAll();
+  };
+
+  const formatEmployeeOption = (em) =>
+    `${em.firstName || em.fullName || ''} ${em.lastName || ''}`.trim() || em.workEmail || em.id;
+
+  const myDisplayName = currentUser?.fullName || currentUser?.name || currentUser?.email || 'My Profile';
 
   // ==================== 1. GETTING STARTED VIEW (08:54 - 09:52 of hr.webm) ====================
   if (topContextTab === 'gettingstarted') {
@@ -587,6 +655,10 @@ export default function PerformanceView({
       setFormulaConfig(fc);
     };
 
+    const effectiveGoalEmpId = goalEmployeeId || actorEmployeeId || employees[0]?.id || '';
+    const effectiveSelfEmpId = selfForm.employeeId || actorEmployeeId || employees[0]?.id || '';
+    const canSelfSubmitObj = Boolean(actorEmployeeId) || employees.length > 0;
+
     return (
       <div className="flex-1 bg-[#edf1f7] p-5 overflow-y-auto space-y-4 text-xs">
         <div className="bg-white rounded-md border border-slate-200 p-5 flex flex-wrap items-center justify-between gap-3">
@@ -601,9 +673,10 @@ export default function PerformanceView({
           <div className="flex flex-wrap items-center gap-2">
             {[
               { id: 'appraisals', label: `Appraisals (${appraisals.length})` },
+              { id: 'objectives', label: `Goal Sheets & OKRs (${objectiveSets.length})` },
               { id: 'cycles', label: `Cycles & Formula (${performanceCycles.length})` },
               { id: 'pip', label: `PIPs (${pips.length})` },
-              { id: 'development', label: 'Development Actions' },
+              { id: 'development', label: `Development (${devActions.length})` },
             ].map((t) => (
               <button
                 key={t.id}
@@ -621,46 +694,289 @@ export default function PerformanceView({
                 {t.label}
               </button>
             ))}
-            <button
-              type="button"
-              onClick={() => setGoalModalOpen(true)}
-              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded"
-            >
-              + 6-Objective Goal Sheet
-            </button>
-            <button
-              type="button"
-              onClick={() => setTopContextTab && setTopContextTab('settings')}
-              className="px-3.5 py-1.5 border border-slate-300 text-slate-700 font-medium rounded hover:bg-slate-50"
-            >
-              Performance Settings
-            </button>
+            {canSelfSubmitObj && (
+              <button
+                type="button"
+                onClick={() => {
+                  setAmendMode(false);
+                  setGoalModalOpen(true);
+                }}
+                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded"
+              >
+                + 6-Objective Goal Sheet
+              </button>
+            )}
+            {canEditPerfSettings && (
+              <button
+                type="button"
+                onClick={() => setTopContextTab && setTopContextTab('settings')}
+                className="px-3.5 py-1.5 border border-slate-300 text-slate-700 font-medium rounded hover:bg-slate-50"
+              >
+                Performance Settings
+              </button>
+            )}
           </div>
         </div>
 
+        {opsSubTab === 'objectives' && (
+          <div className="space-y-4">
+            <div className="bg-white rounded-md border border-slate-200 p-4 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h4 className="font-semibold text-slate-800">6-Objective SMART Goal Sheets (Maker-Checker & Versioning)</h4>
+                <p className="text-[11px] text-slate-500">
+                  Weights must total 100%. Approved sheets are immutable; amendments preserve prior versions as SUPERSEDED.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setAmendMode(false);
+                  setGoalModalOpen(true);
+                }}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-medium"
+              >
+                + Draft 6-Objective Sheet
+              </button>
+            </div>
+
+            <div className="bg-white rounded-md border border-slate-200 overflow-hidden">
+              {objectiveSets.length === 0 ? (
+                <NdakalaEmptyState
+                  title="No Goal Sheets Created Yet"
+                  subtitle="Create a 6-objective SMART goal sheet totaling 100% weight and submit for manager approval."
+                  actionLabel="Create 6-Objective Sheet"
+                  onAction={() => {
+                    setAmendMode(false);
+                    setGoalModalOpen(true);
+                  }}
+                />
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {objectiveSets.map((set) => {
+                    const isOwner = set.employeeId === actorEmployeeId || set.employee?.userId === currentUser?.id;
+                    const empName = set.employee
+                      ? `${set.employee.firstName} ${set.employee.lastName} (${set.employee.employeeNumber})`
+                      : set.employeeId;
+                    const badgeClass =
+                      set.status === 'APPROVED'
+                        ? 'bg-emerald-50 text-emerald-700'
+                        : set.status === 'SUPERSEDED'
+                        ? 'bg-slate-100 text-slate-500'
+                        : set.status === 'SUBMITTED'
+                        ? 'bg-blue-50 text-[#0088ff]'
+                        : 'bg-amber-50 text-amber-700';
+                    return (
+                      <div key={set.id} className="p-4 space-y-2.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-semibold text-slate-800">{set.title}</span>
+                              <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px] font-mono">
+                                v{set.version}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${badgeClass}`}>
+                                {set.status}
+                              </span>
+                              {set.isImmutable && (
+                                <span className="px-2 py-0.5 rounded bg-purple-50 text-purple-700 text-[10px] font-medium">
+                                  Immutable Record
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              {empName} • {set.cycle?.title || 'Annual Cycle'} • {(set.objectives || []).length} Objectives
+                            </div>
+                            {set.amendmentReason && (
+                              <div className="text-[11px] text-amber-700 mt-1">
+                                Amendment Reason: {set.amendmentReason}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {set.status === 'DRAFT' && isOwner && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    await apiPost(`/api/v1/performance/objectives/${set.id}/submit`, {});
+                                    notify('Goal sheet submitted for approval.');
+                                    await refreshEverything();
+                                  } catch (err) {
+                                    notify(err?.message || 'Submission failed', 'error');
+                                  }
+                                }}
+                                className="px-3 py-1 bg-[#0088ff] text-white rounded text-[11px] font-medium"
+                              >
+                                Submit Goal Sheet
+                              </button>
+                            )}
+                            {(set.status === 'SUBMITTED' || set.status === 'DRAFT') &&
+                              canApproveObjectives &&
+                              !isOwner && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    try {
+                                      await apiPost(`/api/v1/performance/objectives/${set.id}/approve`, {});
+                                      notify('Goal sheet approved & locked (immutable).');
+                                      await refreshEverything();
+                                    } catch (err) {
+                                      notify(err?.message || 'Approval blocked', 'error');
+                                    }
+                                  }}
+                                  className="px-3 py-1 bg-emerald-600 text-white rounded text-[11px] font-medium"
+                                >
+                                  Approve Goal Sheet
+                                </button>
+                              )}
+                            {set.status === 'APPROVED' && canApproveObjectives && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setAmendSheetId(set.id);
+                                  if (Array.isArray(set.objectives) && set.objectives.length > 0) {
+                                    setObjectives(
+                                      set.objectives.map((o) => ({
+                                        title: o.title,
+                                        weight: Number(o.weightPercent ?? 0),
+                                      }))
+                                    );
+                                  }
+                                  setAmendMode(true);
+                                  setGoalModalOpen(true);
+                                }}
+                                className="px-3 py-1 bg-amber-600 text-white rounded text-[11px] font-medium"
+                              >
+                                Amend (Create v{set.version + 1})
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                          {(set.objectives || []).map((obj, idx) => (
+                            <div key={obj.id || idx} className="p-2.5 bg-slate-50 border border-slate-200 rounded text-[11px] flex items-center justify-between gap-2">
+                              <span className="text-slate-700 truncate">#{idx + 1} {obj.title}</span>
+                              <span className="font-semibold text-slate-900 shrink-0">{obj.weightPercent ?? '-'}%</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {opsSubTab === 'appraisals' && (
           <div className="space-y-4">
-            {/* Submit Self-Appraisal & Peer Feedback Quick Action Bar */}
+            {/* Submit Self-Appraisal & Rating Scale Quick Bar */}
             <div className="bg-white rounded-md border border-slate-200 p-4 flex flex-wrap items-center justify-between gap-2">
-              <span className="font-semibold text-slate-700">
-                Appraisal Rating Scale Reference: {ratingScales.map((s) => `${s.code}-${s.label}`).join(' | ') || '1 (Unacceptable) to 6 (Exceptional)'}
+              <span className="font-semibold text-slate-700 text-[11px]">
+                Rating Scale: {ratingScales.map((s) => `${s.code}-${s.label}`).join(' | ') || '1 (Too Early to Assess) to 6 (Outstanding)'}
               </span>
               <button
                 type="button"
                 onClick={() => setActionModal('self')}
-                className="px-3 py-1.5 bg-[#0088ff] text-white rounded font-medium"
+                className="px-3 py-1.5 bg-[#0088ff] text-white rounded font-medium shrink-0"
               >
                 Submit Self-Appraisal
               </button>
             </div>
+
+            {/* Assigned 360 Peer Feedback Inbox for Current User */}
+            {pendingPeerRequests.length > 0 && canSubmitPeerFeedback && (
+              <div className="bg-white rounded-md border border-indigo-200 p-4 space-y-2.5">
+                <h4 className="font-semibold text-indigo-900">
+                  My Assigned 360° Peer Feedback Requests ({pendingPeerRequests.length})
+                </h4>
+                <div className="space-y-2">
+                  {pendingPeerRequests.map((reqItem) => {
+                    const draft = peerDrafts[reqItem.id] || {
+                      feedbackText: 'Consistently collaborative, delivers rigorous advisory analysis on time.',
+                      strengths: 'Structured communication & technical thoroughness',
+                      improvementAreas: 'Proactive early risk flagging',
+                    };
+                    return (
+                      <div key={reqItem.id} className="p-3 bg-indigo-50/40 border border-indigo-100 rounded space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="font-medium text-slate-800">
+                            Reviewee: {reqItem.appraisal?.employee?.firstName} {reqItem.appraisal?.employee?.lastName} ({reqItem.appraisal?.employee?.employeeNumber}) • {reqItem.appraisal?.cycle?.title}
+                          </div>
+                          <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${reqItem.submittedAt ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                            {reqItem.submittedAt ? 'SUBMITTED' : 'PENDING YOUR INPUT'}
+                          </span>
+                        </div>
+                        {reqItem.submittedAt ? (
+                          <p className="text-slate-600 text-[11px]">Submitted commentary: {reqItem.feedbackText}</p>
+                        ) : (
+                          <div className="space-y-2">
+                            <textarea
+                              rows={2}
+                              value={draft.feedbackText}
+                              onChange={(e) =>
+                                setPeerDrafts((prev) => ({ ...prev, [reqItem.id]: { ...draft, feedbackText: e.target.value } }))
+                              }
+                              placeholder="Confidential 360° peer commentary (min 5 chars)"
+                              className="w-full px-2.5 py-1.5 border border-slate-300 rounded bg-white"
+                            />
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <input
+                                type="text"
+                                value={draft.strengths}
+                                onChange={(e) =>
+                                  setPeerDrafts((prev) => ({ ...prev, [reqItem.id]: { ...draft, strengths: e.target.value } }))
+                                }
+                                placeholder="Key strengths observed"
+                                className="px-2.5 py-1.5 border border-slate-300 rounded bg-white"
+                              />
+                              <input
+                                type="text"
+                                value={draft.improvementAreas}
+                                onChange={(e) =>
+                                  setPeerDrafts((prev) => ({ ...prev, [reqItem.id]: { ...draft, improvementAreas: e.target.value } }))
+                                }
+                                placeholder="Suggested growth focus"
+                                className="px-2.5 py-1.5 border border-slate-300 rounded bg-white"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await apiPost(`/api/v1/performance/peer-feedback/${reqItem.id}/submit`, {
+                                    peerEmployeeId: reqItem.peerEmployeeId,
+                                    feedbackText: draft.feedbackText,
+                                    strengths: draft.strengths,
+                                    improvementAreas: draft.improvementAreas,
+                                  });
+                                  notify('Confidential 360° peer feedback submitted.');
+                                  await refreshEverything();
+                                } catch (err) {
+                                  notify(err?.message || 'Peer feedback submission failed', 'error');
+                                }
+                              }}
+                              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-[11px] font-medium"
+                            >
+                              Submit 360° Feedback
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="bg-white rounded-md border border-slate-200 overflow-hidden">
               {appraisals.length === 0 ? (
                 <NdakalaEmptyState
                   title="No Appraisals Initiated Yet"
                   subtitle="Configure your 6-objective goal sheet or submit a self-appraisal to start the evaluation workflow."
-                  actionLabel="Set 6 Objectives"
-                  onAction={() => setGoalModalOpen(true)}
+                  actionLabel="Submit Self-Appraisal"
+                  onAction={() => setActionModal('self')}
                 />
               ) : (
                 <table className="w-full text-left border-collapse text-xs">
@@ -675,79 +991,100 @@ export default function PerformanceView({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {appraisals.map((ap) => (
-                      <tr key={ap.id} className="hover:bg-slate-50">
-                        <td className="py-3 px-4 font-medium text-slate-800">
-                          {ap.employee ? `${ap.employee.firstName || ap.employee.fullName || ''} ${ap.employee.lastName || ''}`.trim() : ap.employeeId}
-                        </td>
-                        <td className="py-3 px-4 text-slate-600">{ap.cycle?.title || ap.cycle?.name || 'Annual 2026'}</td>
-                        <td className="py-3 px-4">
-                          <span className="px-2 py-0.5 rounded bg-blue-50 text-[#0088ff] text-[11px] font-medium">
-                            {ap.status}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-slate-700 font-semibold">{ap.managerRatingCode ?? ap.managerRating ?? '-'}</td>
-                        <td className="py-3 px-4 text-slate-700 font-semibold">{ap.moderatedRatingCode ?? '-'}</td>
-                        <td className="py-3 px-4 text-right space-x-2">
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              setSelectedAppraisal(ap);
-                              const d = await apiGet(`/api/v1/performance/appraisals/${ap.id}`).catch(() => ap);
-                              setSelectedAppraisalDetail(d);
-                            }}
-                            className="text-slate-700 hover:underline font-medium"
-                          >
-                            Inspect
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedAppraisal(ap);
-                              setActionModal('manager');
-                            }}
-                            className="text-[#0088ff] hover:underline font-medium"
-                          >
-                            Manager Review
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedAppraisal(ap);
-                              setActionModal('meeting');
-                            }}
-                            className="text-indigo-600 hover:underline font-medium"
-                          >
-                            1:1 Meeting
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedAppraisal(ap);
-                              setActionModal('moderate');
-                            }}
-                            className="text-amber-600 hover:underline font-medium"
-                          >
-                            Moderate
-                          </button>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              try {
-                                await apiPost(`/api/v1/performance/appraisals/${ap.id}/approve`, {});
-                                notify('Partner final approval recorded.');
-                                onRefreshAll && onRefreshAll();
-                              } catch (err) {
-                                notify(err?.message || 'Partner approval blocked', 'error');
-                              }
-                            }}
-                            className="text-emerald-600 hover:underline font-medium"
-                          >
-                            Approve
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    {appraisals.map((ap) => {
+                      const isSelfRow = ap.employeeId === actorEmployeeId || ap.employee?.userId === currentUser?.id;
+                      const badgeCls =
+                        ap.status === 'PARTNER_APPROVED'
+                          ? 'bg-emerald-50 text-emerald-700'
+                          : ap.status === 'HR_MODERATED'
+                          ? 'bg-amber-50 text-amber-700'
+                          : 'bg-blue-50 text-[#0088ff]';
+                      return (
+                        <tr key={ap.id} className="hover:bg-slate-50">
+                          <td className="py-3 px-4 font-medium text-slate-800">
+                            {ap.employee ? `${ap.employee.firstName || ap.employee.fullName || ''} ${ap.employee.lastName || ''}`.trim() : ap.employeeId}
+                          </td>
+                          <td className="py-3 px-4 text-slate-600">{ap.cycle?.title || ap.cycle?.name || 'Annual 2026'}</td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${badgeCls}`}>
+                              {ap.status}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-slate-700 font-semibold">{ap.managerRatingCode ?? ap.managerRating ?? '-'}</td>
+                          <td className="py-3 px-4 text-slate-700 font-semibold">{ap.moderatedRatingCode ?? '-'}</td>
+                          <td className="py-3 px-4 text-right space-x-2">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                setSelectedAppraisal(ap);
+                                const d = await apiGet(`/api/v1/performance/appraisals/${ap.id}`).catch(() => ap);
+                                setSelectedAppraisalDetail(d);
+                              }}
+                              className="text-slate-700 hover:underline font-medium"
+                            >
+                              Inspect
+                            </button>
+                            {canManageTeamAppraisal && !isSelfRow && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedAppraisal(ap);
+                                    setActionModal('manager');
+                                  }}
+                                  className="text-[#0088ff] hover:underline font-medium"
+                                >
+                                  Manager Review
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedAppraisal(ap);
+                                    setActionModal('meeting');
+                                  }}
+                                  className="text-indigo-600 hover:underline font-medium"
+                                >
+                                  1:1 Meeting
+                                </button>
+                              </>
+                            )}
+                            {canModerateAppraisal && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedAppraisal(ap);
+                                  setActionModal('moderate');
+                                }}
+                                className="text-amber-600 hover:underline font-medium"
+                              >
+                                Moderate
+                              </button>
+                            )}
+                            {canApproveAppraisal && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    await apiPost(`/api/v1/performance/appraisals/${ap.id}/approve`, {});
+                                    notify('Partner final approval recorded.');
+                                    await refreshEverything();
+                                    if (selectedAppraisalDetail?.id === ap.id) {
+                                      const d = await apiGet(`/api/v1/performance/appraisals/${ap.id}`).catch(() => null);
+                                      if (d) setSelectedAppraisalDetail(d);
+                                    }
+                                  } catch (err) {
+                                    notify(err?.message || 'Partner approval blocked', 'error');
+                                  }
+                                }}
+                                className="text-emerald-600 hover:underline font-medium"
+                              >
+                                Approve
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
@@ -757,68 +1094,90 @@ export default function PerformanceView({
               <div className="bg-white rounded-md border border-blue-200 p-5 space-y-3">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                   <h4 className="font-semibold text-slate-800">
-                    Appraisal 360 & Peer Feedback — {selectedAppraisalDetail.status}
+                    Appraisal 360 & Peer Feedback — {selectedAppraisalDetail.employee?.firstName} {selectedAppraisalDetail.employee?.lastName} ({selectedAppraisalDetail.status})
                   </h4>
                   <button type="button" onClick={() => setSelectedAppraisalDetail(null)} className="text-slate-400 hover:text-slate-700"><X size={14} /></button>
                 </div>
-                <p className="text-slate-600">Self Achievements: {selectedAppraisalDetail.selfAchievements}</p>
-                <div className="flex items-center gap-2 pt-2">
-                  <select value={peerReqEmpId} onChange={(e) => setPeerReqEmpId(e.target.value)} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
-                    <option value="">Select Peer Employee for 360 Feedback</option>
-                    {employees.map((em) => (
-                      <option key={em.id} value={em.id}>{em.firstName || em.fullName} {em.lastName || ''}</option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (!peerReqEmpId) return;
-                      try {
-                        await apiPost(`/api/v1/performance/appraisals/${selectedAppraisalDetail.id}/peer-feedback/request`, {
-                          peerEmployeeId: peerReqEmpId,
-                        });
-                        notify('Peer feedback request dispatched.');
-                        const refreshed = await apiGet(`/api/v1/performance/appraisals/${selectedAppraisalDetail.id}`);
-                        setSelectedAppraisalDetail(refreshed);
-                      } catch (err) {
-                        notify(err?.message || 'Unable to request peer feedback', 'error');
-                      }
-                    }}
-                    className="px-3 py-1.5 bg-[#0088ff] text-white rounded font-medium"
-                  >
-                    Request Peer Feedback
-                  </button>
-                </div>
-                {(selectedAppraisalDetail.peerFeedbacks || []).map((pf) => (
-                  <div key={pf.id} className="p-3 bg-slate-50 border border-slate-200 rounded flex items-center justify-between gap-3">
-                    <div>
-                      <div className="font-medium text-slate-800">Peer: {pf.peerEmployeeId}</div>
-                      <div className="text-slate-600">{pf.feedbackText || 'Awaiting submission...'}</div>
-                    </div>
-                    {!pf.submittedAt && (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            await apiPost(`/api/v1/performance/peer-feedback/${pf.id}/submit`, {
-                              peerEmployeeId: pf.peerEmployeeId,
-                              feedbackText: 'Consistently collaborative, timely delivery and client empathy.',
-                              strengths: 'Advisory rigor & teamwork',
-                            });
-                            notify('Peer feedback submitted.');
-                            const refreshed = await apiGet(`/api/v1/performance/appraisals/${selectedAppraisalDetail.id}`);
-                            setSelectedAppraisalDetail(refreshed);
-                          } catch (err) {
-                            notify(err?.message || 'Failed to submit peer feedback', 'error');
-                          }
-                        }}
-                        className="px-2.5 py-1 bg-emerald-600 text-white rounded text-[11px]"
-                      >
-                        Submit Peer Input
-                      </button>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
+                  <div className="p-2.5 bg-slate-50 rounded border border-slate-200">
+                    <div className="font-semibold text-slate-700 mb-1">Self-Assessment</div>
+                    <p className="text-slate-600">{selectedAppraisalDetail.selfAchievements}</p>
+                    {selectedAppraisalDetail.selfChallenges && (
+                      <p className="text-slate-500 mt-1">Challenges: {selectedAppraisalDetail.selfChallenges}</p>
                     )}
                   </div>
-                ))}
+                  <div className="p-2.5 bg-slate-50 rounded border border-slate-200">
+                    <div className="font-semibold text-slate-700 mb-1">Manager & Moderation Summary</div>
+                    <p className="text-slate-600">
+                      Manager Rating: <b>{selectedAppraisalDetail.managerRatingCode ? `${selectedAppraisalDetail.managerRatingCode} (${selectedAppraisalDetail.managerRatingLabel || ''})` : 'Pending'}</b>
+                    </p>
+                    {selectedAppraisalDetail.reviewMeetingNotes && (
+                      <p className="text-slate-500 mt-1">1:1 Notes: {selectedAppraisalDetail.reviewMeetingNotes}</p>
+                    )}
+                    {selectedAppraisalDetail.moderationNotes && (
+                      <p className="text-amber-700 mt-1">
+                        Moderation ({selectedAppraisalDetail.moderatedRatingCode}): {selectedAppraisalDetail.moderationNotes}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                {canRequestPeerFeedback && (
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <select value={peerReqEmpId} onChange={(e) => setPeerReqEmpId(e.target.value)} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
+                      <option value="">Select Peer Colleague for 360° Feedback</option>
+                      {employees
+                        .filter((em) => em.id !== selectedAppraisalDetail.employeeId)
+                        .map((em) => (
+                          <option key={em.id} value={em.id}>{formatEmployeeOption(em)}</option>
+                        ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!peerReqEmpId) {
+                          notify('Please select a peer colleague first.', 'error');
+                          return;
+                        }
+                        try {
+                          await apiPost(`/api/v1/performance/appraisals/${selectedAppraisalDetail.id}/peer-feedback/request`, {
+                            peerEmployeeId: peerReqEmpId,
+                          });
+                          notify('Peer feedback request dispatched.');
+                          const refreshed = await apiGet(`/api/v1/performance/appraisals/${selectedAppraisalDetail.id}`);
+                          setSelectedAppraisalDetail(refreshed);
+                          await refreshEverything();
+                        } catch (err) {
+                          notify(err?.message || 'Unable to request peer feedback', 'error');
+                        }
+                      }}
+                      className="px-3 py-1.5 bg-[#0088ff] text-white rounded font-medium"
+                    >
+                      Request Peer Feedback
+                    </button>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <div className="font-semibold text-slate-700 text-[11px]">
+                    360° Peer Feedback ({(selectedAppraisalDetail.peerFeedbacks || []).length})
+                  </div>
+                  {(selectedAppraisalDetail.peerFeedbacks || []).map((pf) => (
+                    <div key={pf.id} className="p-3 bg-slate-50 border border-slate-200 rounded flex items-center justify-between gap-3">
+                      <div>
+                        <div className="font-medium text-slate-800">Peer Identity: {pf.peerEmployeeId}</div>
+                        <div className="text-slate-600">{pf.feedbackText || 'Awaiting submission from designated peer...'}</div>
+                      </div>
+                      {pf.submittedAt ? (
+                        <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded text-[11px] font-medium">
+                          Submitted
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 bg-amber-50 text-amber-700 rounded text-[11px] font-medium">
+                          Pending
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -827,41 +1186,64 @@ export default function PerformanceView({
         {opsSubTab === 'cycles' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="bg-white rounded-md border border-slate-200 p-5 space-y-3">
-              <h4 className="font-semibold text-slate-800">Create Performance Cycle</h4>
-              <input type="text" value={cycleForm.title} onChange={(e) => setCycleForm({ ...cycleForm, title: e.target.value })} placeholder="Cycle Title" className="w-full px-3 py-1.5 border border-slate-300 rounded" />
-              <div className="grid grid-cols-3 gap-2">
-                <select value={cycleForm.cycleType} onChange={(e) => setCycleForm({ ...cycleForm, cycleType: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
-                  <option value="ANNUAL">ANNUAL</option>
-                  <option value="QUARTERLY">QUARTERLY</option>
-                </select>
-                <input type="date" value={cycleForm.periodStart} onChange={(e) => setCycleForm({ ...cycleForm, periodStart: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
-                <input type="date" value={cycleForm.periodEnd} onChange={(e) => setCycleForm({ ...cycleForm, periodEnd: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
-              </div>
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    await apiPost('/api/v1/performance/cycles', cycleForm);
-                    notify('Performance cycle created.');
-                    onRefreshAll && onRefreshAll();
-                  } catch (err) {
-                    notify(err?.message || 'Cycle creation failed', 'error');
-                  }
-                }}
-                className="px-3.5 py-1.5 bg-[#0088ff] text-white rounded font-medium"
-              >
-                Create Cycle
-              </button>
-              <div className="pt-2 space-y-1.5">
+              <h4 className="font-semibold text-slate-800">Performance Cycles</h4>
+              {canManageCycles ? (
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded space-y-2.5">
+                  <div className="font-medium text-slate-700">Create New Review Cycle</div>
+                  <input type="text" value={cycleForm.title} onChange={(e) => setCycleForm({ ...cycleForm, title: e.target.value })} placeholder="Cycle Title" className="w-full px-3 py-1.5 border border-slate-300 rounded bg-white" />
+                  <div className="grid grid-cols-3 gap-2">
+                    <select value={cycleForm.cycleType} onChange={(e) => setCycleForm({ ...cycleForm, cycleType: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
+                      <option value="ANNUAL">ANNUAL</option>
+                      <option value="QUARTERLY">QUARTERLY</option>
+                    </select>
+                    <input type="date" title="Period Start" value={cycleForm.periodStart} onChange={(e) => setCycleForm({ ...cycleForm, periodStart: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white" />
+                    <input type="date" title="Period End" value={cycleForm.periodEnd} onChange={(e) => setCycleForm({ ...cycleForm, periodEnd: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="text-[11px] text-slate-600">
+                      Self Deadline
+                      <input type="date" value={cycleForm.selfAppraisalDeadline} onChange={(e) => setCycleForm({ ...cycleForm, selfAppraisalDeadline: e.target.value })} className="mt-0.5 w-full px-2 py-1 border border-slate-300 rounded bg-white" />
+                    </label>
+                    <label className="text-[11px] text-slate-600">
+                      Manager Deadline
+                      <input type="date" value={cycleForm.managerReviewDeadline} onChange={(e) => setCycleForm({ ...cycleForm, managerReviewDeadline: e.target.value })} className="mt-0.5 w-full px-2 py-1 border border-slate-300 rounded bg-white" />
+                    </label>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await apiPost('/api/v1/performance/cycles', cycleForm);
+                        notify('Performance cycle created.');
+                        await refreshEverything();
+                      } catch (err) {
+                        notify(err?.message || 'Cycle creation failed', 'error');
+                      }
+                    }}
+                    className="px-3.5 py-1.5 bg-[#0088ff] text-white rounded font-medium"
+                  >
+                    Create Cycle
+                  </button>
+                </div>
+              ) : (
+                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded text-[11px] text-slate-600">
+                  Restricted (RBAC): Cycle administration is limited to HR Lead / Operations Director / Managing Partner.
+                </div>
+              )}
+              <div className="pt-1 space-y-1.5">
                 {performanceCycles.map((c) => (
                   <div key={c.id} className="p-2.5 border border-slate-200 rounded flex items-center justify-between">
                     <div>
                       <div className="font-semibold text-slate-800">{c.title}</div>
-                      <div className="text-[11px] text-slate-500">{c.cycleType} • {c.periodStart} to {c.periodEnd}</div>
+                      <div className="text-[11px] text-slate-500">
+                        {c.cycleType} • {String(c.periodStart).slice(0, 10)} to {String(c.periodEnd).slice(0, 10)} • Formula: <b>{c.annualFormulaStatus}</b>
+                      </div>
                     </div>
-                    <button type="button" onClick={() => loadCycleAnalytics(c.id)} className="px-2.5 py-1 border border-[#0088ff] text-[#0088ff] rounded text-[11px]">
-                      Metrics & Formula
-                    </button>
+                    {(canViewPerfReports || canManageCycles) && (
+                      <button type="button" onClick={() => loadCycleAnalytics(c.id)} className="px-2.5 py-1 border border-[#0088ff] text-[#0088ff] rounded text-[11px]">
+                        Metrics & Formula
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -869,84 +1251,138 @@ export default function PerformanceView({
 
             <div className="bg-white rounded-md border border-slate-200 p-5 space-y-3">
               <h4 className="font-semibold text-slate-800">Annual Rating Formula Engine & Cohort Calibration</h4>
-              {cycleMetrics && (
-                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded text-[11px]">
-                  Total Appraisals: <b>{cycleMetrics.totalAppraisals ?? 0}</b> • Formula Status: <b>{formulaConfig?.status || 'NONE'}</b>
+              {!canViewPerfReports && !canManageCycles ? (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded text-amber-800 text-[11px]">
+                  Restricted (RBAC): Cycle calibration reports & formula controls require management or executive permission.
                 </div>
-              )}
-              <div className="grid grid-cols-2 gap-2">
-                <select value={formulaForm.model} onChange={(e) => setFormulaForm({ ...formulaForm, model: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
-                  {['SIMPLE_AVERAGE', 'QUARTERLY_WEIGHTED', 'ANNUAL_ONLY', 'HYBRID_SPLIT'].map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-                <select value={formulaForm.roundingMethod} onChange={(e) => setFormulaForm({ ...formulaForm, roundingMethod: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
-                  {['TWO_DECIMALS', 'NEAREST_HALF', 'NEAREST_INTEGER', 'FLOOR', 'CEIL'].map((r) => (
-                    <option key={r} value={r}>{r}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!selectedCycleId) return;
-                    try {
-                      await apiPost(`/api/v1/performance/cycles/${selectedCycleId}/formula-config`, {
-                        model: formulaForm.model,
-                        roundingMethod: formulaForm.roundingMethod,
-                        weights: { Q1: formulaForm.q1, Q2: formulaForm.q2, Q3: formulaForm.q3, Q4: formulaForm.q4 },
-                      });
-                      notify('Proposed annual rating formula.');
-                      loadCycleAnalytics(selectedCycleId);
-                    } catch (err) {
-                      notify(err?.message || 'Formula proposal failed', 'error');
-                    }
-                  }}
-                  className="px-3 py-1.5 bg-slate-800 text-white rounded font-medium"
-                >
-                  Propose Formula
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!selectedCycleId) return;
-                    try {
-                      await apiPost(`/api/v1/performance/cycles/${selectedCycleId}/formula-config/approve`, {});
-                      notify('Annual rating formula approved.');
-                      loadCycleAnalytics(selectedCycleId);
-                    } catch (err) {
-                      notify(err?.message || 'Maker-checker approval blocked', 'error');
-                    }
-                  }}
-                  className="px-3 py-1.5 bg-emerald-600 text-white rounded font-medium"
-                >
-                  Approve Formula
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!selectedCycleId) return;
-                    try {
-                      const sim = await apiPost(`/api/v1/performance/cycles/${selectedCycleId}/formula-config/simulate`, {
-                        sampleScores: [4, 4, 5, 5],
-                        roundingMethod: formulaForm.roundingMethod,
-                      });
-                      setFormulaSimResult(sim);
-                      notify('Formula simulation completed.');
-                    } catch (err) {
-                      notify(err?.message || 'Simulation failed', 'error');
-                    }
-                  }}
-                  className="px-3 py-1.5 border border-[#0088ff] text-[#0088ff] rounded font-medium"
-                >
-                  Run Interactive Simulation
-                </button>
-              </div>
-              {formulaSimResult && (
-                <pre className="p-2.5 bg-slate-900 text-emerald-300 rounded text-[11px] overflow-x-auto">
-                  {JSON.stringify(formulaSimResult, null, 2)}
-                </pre>
+              ) : (
+                <>
+                  {cycleMetrics && (
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded text-[11px] space-y-1.5">
+                      <div className="flex flex-wrap gap-3">
+                        <span>Total Appraisals: <b>{cycleMetrics.totalAppraisals ?? 0}</b></span>
+                        <span>Completed: <b>{cycleMetrics.completedCount ?? 0}</b></span>
+                        <span>Formula Status: <b>{formulaConfig?.annualFormulaStatus || cycleMetrics.annualFormulaStatus || 'PENDING_APPROVAL'}</b></span>
+                      </div>
+                      <div className="flex flex-wrap gap-3">
+                        <span>Average Score (2–6): <b>{cycleMetrics.averageNumericScore ?? 'N/A'}</b></span>
+                        <span>Rating 1 Excluded: <b>{cycleMetrics.rating1ExcludedCount ?? 0}</b></span>
+                        <span>
+                          Composite Score:{' '}
+                          <b>
+                            {cycleMetrics.annualCompositeScore !== null && cycleMetrics.annualCompositeScore !== undefined
+                              ? `${cycleMetrics.annualCompositeScore} (${cycleMetrics.annualCompositeRatingLabel || ''})`
+                              : 'NULL (Pending Partner Approval)'}
+                          </b>
+                        </span>
+                      </div>
+                      <p className="text-slate-600">{cycleMetrics.notice}</p>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-2">
+                    <select value={formulaForm.model} onChange={(e) => setFormulaForm({ ...formulaForm, model: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
+                      {['SIMPLE_AVERAGE', 'QUARTERLY_WEIGHTED', 'ANNUAL_ONLY', 'HYBRID_SPLIT'].map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                    <select value={formulaForm.roundingMethod} onChange={(e) => setFormulaForm({ ...formulaForm, roundingMethod: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
+                      {['TWO_DECIMALS', 'NEAREST_HALF', 'NEAREST_INTEGER', 'FLOOR', 'CEIL'].map((r) => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {formulaForm.model === 'QUARTERLY_WEIGHTED' && (
+                    <div className="grid grid-cols-4 gap-2">
+                      {['q1', 'q2', 'q3', 'q4'].map((qk) => (
+                        <label key={qk} className="text-[11px] text-slate-600">
+                          {qk.toUpperCase()} (%)
+                          <input
+                            type="number"
+                            value={formulaForm[qk]}
+                            onChange={(e) => setFormulaForm({ ...formulaForm, [qk]: Number(e.target.value) })}
+                            className="mt-0.5 w-full px-2 py-1 border border-slate-300 rounded"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {canManageCycles && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const targetCycle = selectedCycleId || performanceCycles[0]?.id;
+                          if (!targetCycle) return;
+                          try {
+                            await apiPost(`/api/v1/performance/cycles/${targetCycle}/formula-config`, {
+                              model: formulaForm.model,
+                              roundingMethod: formulaForm.roundingMethod,
+                              weights:
+                                formulaForm.model === 'QUARTERLY_WEIGHTED'
+                                  ? { Q1: formulaForm.q1, Q2: formulaForm.q2, Q3: formulaForm.q3, Q4: formulaForm.q4 }
+                                  : formulaForm.model === 'HYBRID_SPLIT'
+                                  ? { quarterlyWeight: 40, annualWeight: 60 }
+                                  : undefined,
+                            });
+                            notify('Proposed annual rating formula (awaiting Managing Partner Maker-Checker approval).');
+                            await loadCycleAnalytics(targetCycle);
+                            await refreshEverything();
+                          } catch (err) {
+                            notify(err?.message || 'Formula proposal failed', 'error');
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-slate-800 text-white rounded font-medium"
+                      >
+                        Propose Formula
+                      </button>
+                    )}
+                    {canApproveAppraisal && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const targetCycle = selectedCycleId || performanceCycles[0]?.id;
+                          if (!targetCycle) return;
+                          try {
+                            await apiPost(`/api/v1/performance/cycles/${targetCycle}/formula-config/approve`, {});
+                            notify('Annual rating formula approved & activated.');
+                            await loadCycleAnalytics(targetCycle);
+                            await refreshEverything();
+                          } catch (err) {
+                            notify(err?.message || 'Maker-checker approval blocked', 'error');
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-emerald-600 text-white rounded font-medium"
+                      >
+                        Approve Formula
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const targetCycle = selectedCycleId || performanceCycles[0]?.id;
+                        if (!targetCycle) return;
+                        try {
+                          const sim = await apiPost(`/api/v1/performance/cycles/${targetCycle}/formula-config/simulate`, {
+                            sampleScores: [3, 4, 4, 5],
+                            roundingMethod: formulaForm.roundingMethod,
+                          });
+                          setFormulaSimResult(sim);
+                          notify('Formula simulation completed.');
+                        } catch (err) {
+                          notify(err?.message || 'Simulation failed', 'error');
+                        }
+                      }}
+                      className="px-3 py-1.5 border border-[#0088ff] text-[#0088ff] rounded font-medium"
+                    >
+                      Run Interactive Simulation
+                    </button>
+                  </div>
+                  {formulaSimResult && (
+                    <pre className="p-2.5 bg-slate-900 text-emerald-300 rounded text-[11px] overflow-x-auto">
+                      {JSON.stringify(formulaSimResult, null, 2)}
+                    </pre>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -954,167 +1390,264 @@ export default function PerformanceView({
 
         {opsSubTab === 'pip' && (
           <div className="space-y-4">
-            <div className="bg-white rounded-md border border-slate-200 p-5 space-y-3">
-              <h4 className="font-semibold text-slate-800">Initiate 30/60/90-Day Performance Improvement Plan (PIP)</h4>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                <select value={pipForm.employeeId} onChange={(e) => setPipForm({ ...pipForm, employeeId: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
-                  {employees.map((em) => <option key={em.id} value={em.id}>{em.firstName || em.fullName} {em.lastName || ''}</option>)}
-                </select>
-                <select value={pipForm.lineManagerId} onChange={(e) => setPipForm({ ...pipForm, lineManagerId: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
-                  {employees.map((em) => <option key={em.id} value={em.id}>Mgr: {em.firstName || em.fullName} {em.lastName || ''}</option>)}
-                </select>
-                <select value={pipForm.triggerReason} onChange={(e) => setPipForm({ ...pipForm, triggerReason: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
-                  {['FIRST_TIME_RATING_2', 'CONSECUTIVE_RATING_2', 'RATING_2_WHILE_ON_PIP', 'RATING_3_INSUFFICIENT_IMPROVEMENT', 'CAPABILITY_DEFICIT'].map((r) => (
-                    <option key={r} value={r}>{r}</option>
-                  ))}
-                </select>
-                <input type="number" min="1" max="3" value={pipForm.durationMonths} onChange={(e) => setPipForm({ ...pipForm, durationMonths: Number(e.target.value) })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
-              </div>
-              <input type="text" value={pipForm.baselineAssessment} onChange={(e) => setPipForm({ ...pipForm, baselineAssessment: e.target.value })} placeholder="Baseline assessment (min 5 chars)" className="w-full px-3 py-1.5 border border-slate-300 rounded" />
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    await apiPost('/api/v1/performance/pip', {
-                      ...pipForm,
-                      smartTargets: [{ target: pipForm.targetTitle, measurement: pipForm.targetMeasurement, dueDate: pipForm.endDate }],
-                    });
-                    notify('PIP initiated with SMART targets.');
-                    onRefreshAll && onRefreshAll();
-                  } catch (err) {
-                    notify(err?.message || 'PIP initiation failed', 'error');
-                  }
-                }}
-                className="px-4 py-1.5 bg-[#0088ff] text-white rounded font-medium"
-              >
-                Initiate PIP
-              </button>
-            </div>
-
-            <div className="bg-white rounded-md border border-slate-200 p-5 space-y-2.5">
-              <h4 className="font-semibold text-slate-800">Active & Historical PIPs</h4>
-              {pips.map((p) => (
-                <div key={p.id} className="p-3 border border-slate-200 rounded flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <div className="font-semibold text-slate-800">{p.employee?.firstName || p.employeeId} • {p.triggerReason} ({p.status})</div>
-                    <div className="text-[11px] text-slate-500">{p.startDate} to {p.endDate}</div>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await apiPost(`/api/v1/performance/pip/${p.id}/acknowledge`, { employeeId: p.employeeId, comments: 'Acknowledged SMART targets' });
-                          notify('PIP acknowledged.');
-                          onRefreshAll && onRefreshAll();
-                        } catch (err) {
-                          notify(err?.message || 'Acknowledge blocked', 'error');
-                        }
-                      }}
-                      className="px-2.5 py-1 border border-slate-300 rounded text-[11px]"
-                    >
-                      Acknowledge
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await apiPost(`/api/v1/performance/pip/${p.id}/check-ins`, {
-                            checkInMonth: 1,
-                            scheduledDate: '2026-12-15',
-                            managerReviewEvidence: pipCheckInForm.managerReviewEvidence,
-                            progressStatus: 'SATISFACTORY',
-                          });
-                          notify('Monthly PIP check-in logged.');
-                          onRefreshAll && onRefreshAll();
-                        } catch (err) {
-                          notify(err?.message || 'Check-in failed', 'error');
-                        }
-                      }}
-                      className="px-2.5 py-1 bg-[#0088ff] text-white rounded text-[11px]"
-                    >
-                      Log Month-1 Check-In
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await apiPost(`/api/v1/performance/pip/${p.id}/outcome`, {
-                            outcomeRecommendation: 'CLEARANCE',
-                            outcomeNotes: 'Met all SMART milestones during PIP period.',
-                          });
-                          notify('PIP clearance outcome authorized.');
-                          onRefreshAll && onRefreshAll();
-                        } catch (err) {
-                          notify(err?.message || 'Outcome failed', 'error');
-                        }
-                      }}
-                      className="px-2.5 py-1 bg-emerald-600 text-white rounded text-[11px]"
-                    >
-                      Authorize Clearance
-                    </button>
-                  </div>
+            {canInitiatePip && (
+              <div className="bg-white rounded-md border border-slate-200 p-5 space-y-3">
+                <div>
+                  <h4 className="font-semibold text-slate-800">Initiate 30/60/90-Day Performance Improvement Plan (PIP)</h4>
+                  <p className="text-[11px] text-slate-500">
+                    Capability process strictly capped at 1–3 months (segregated from disciplinary misconduct).
+                  </p>
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {opsSubTab === 'development' && (
-          <div className="bg-white rounded-md border border-slate-200 p-5 space-y-3">
-            <h4 className="font-semibold text-slate-800">Record & Complete Development Actions</h4>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">
-              <select value={devForm.employeeId} onChange={(e) => setDevForm({ ...devForm, employeeId: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
-                {employees.map((em) => <option key={em.id} value={em.id}>{em.firstName || em.fullName} {em.lastName || ''}</option>)}
-              </select>
-              <input type="text" value={devForm.objective} onChange={(e) => setDevForm({ ...devForm, objective: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
-              <input type="date" value={devForm.targetDate} onChange={(e) => setDevForm({ ...devForm, targetDate: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
-            </div>
-            <input type="text" value={devForm.actionDescription} onChange={(e) => setDevForm({ ...devForm, actionDescription: e.target.value })} className="w-full px-2.5 py-1.5 border border-slate-300 rounded" />
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    const act = await apiPost('/api/v1/performance/development/actions', devForm);
-                    notify(`Recorded development action (${act.id.slice(0, 8)}).`);
-                    setLastCreatedObjSetId(act.id);
-                  } catch (err) {
-                    notify(err?.message || 'Failed to record action', 'error');
-                  }
-                }}
-                className="px-3.5 py-1.5 bg-[#0088ff] text-white rounded font-medium"
-              >
-                Add Development Action
-              </button>
-              {lastCreatedObjSetId && (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                  <select value={pipForm.employeeId} onChange={(e) => setPipForm({ ...pipForm, employeeId: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
+                    {employees.map((em) => <option key={em.id} value={em.id}>{formatEmployeeOption(em)}</option>)}
+                  </select>
+                  <select value={pipForm.lineManagerId} onChange={(e) => setPipForm({ ...pipForm, lineManagerId: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
+                    {employees.map((em) => <option key={em.id} value={em.id}>Mgr: {formatEmployeeOption(em)}</option>)}
+                  </select>
+                  <select value={pipForm.triggerReason} onChange={(e) => setPipForm({ ...pipForm, triggerReason: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
+                    {['FIRST_TIME_RATING_2', 'CONSECUTIVE_RATING_2', 'RATING_2_WHILE_ON_PIP', 'RATING_3_INSUFFICIENT_IMPROVEMENT', 'CAPABILITY_DEFICIT'].map((r) => (
+                      <option key={r} value={r}>{r}</option>
+                    ))}
+                  </select>
+                  <input type="number" min="1" max="3" value={pipForm.durationMonths} onChange={(e) => setPipForm({ ...pipForm, durationMonths: Number(e.target.value) })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <input type="text" value={pipForm.targetTitle} onChange={(e) => setPipForm({ ...pipForm, targetTitle: e.target.value })} placeholder="SMART Target" className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                  <input type="text" value={pipForm.targetMeasurement} onChange={(e) => setPipForm({ ...pipForm, targetMeasurement: e.target.value })} placeholder="Measurement Metric" className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                  <input type="text" value={pipForm.baselineAssessment} onChange={(e) => setPipForm({ ...pipForm, baselineAssessment: e.target.value })} placeholder="Baseline assessment (min 5 chars)" className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                </div>
                 <button
                   type="button"
                   onClick={async () => {
                     try {
-                      await apiPatch(`/api/v1/performance/development/actions/${lastCreatedObjSetId}/complete`, {
-                        evidence: 'Verified CPE certificate uploaded to HR vault',
+                      await apiPost('/api/v1/performance/pip', {
+                        ...pipForm,
+                        smartTargets: [{ target: pipForm.targetTitle, measurement: pipForm.targetMeasurement, dueDate: pipForm.endDate }],
                       });
-                      notify('Development action marked complete.');
+                      notify('PIP initiated with SMART targets.');
+                      await refreshEverything();
                     } catch (err) {
-                      notify(err?.message || 'Completion update failed', 'error');
+                      notify(err?.message || 'PIP initiation failed', 'error');
                     }
                   }}
-                  className="px-3.5 py-1.5 bg-emerald-600 text-white rounded font-medium"
+                  className="px-4 py-1.5 bg-[#0088ff] text-white rounded font-medium"
                 >
-                  Mark Latest Action Completed
+                  Initiate PIP
                 </button>
+              </div>
+            )}
+
+            <div className="bg-white rounded-md border border-slate-200 p-5 space-y-3">
+              <h4 className="font-semibold text-slate-800">Active & Historical PIPs ({pips.length})</h4>
+              {pips.length === 0 ? (
+                <p className="text-slate-500">No active or historical PIPs within your scope.</p>
+              ) : (
+                pips.map((p) => {
+                  const isAssignedEmployee = p.employeeId === actorEmployeeId || p.employee?.userId === currentUser?.id;
+                  const empLabel = p.employee ? `${p.employee.firstName} ${p.employee.lastName} (${p.employee.employeeNumber})` : p.employeeId;
+                  return (
+                    <div key={p.id} className="p-3.5 border border-slate-200 rounded space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="font-semibold text-slate-800">
+                            {p.pipNumber ? `${p.pipNumber} • ` : ''}{empLabel} • {p.triggerReason}
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            Status: <b>{p.status}</b> • {p.durationMonths} Month(s) • {String(p.startDate).slice(0, 10)} to {String(p.endDate).slice(0, 10)}
+                            {p.isCapabilityProcess ? ' • Capability Process (Non-Disciplinary)' : ''}
+                          </div>
+                          {p.employeeAcknowledgedAt && (
+                            <div className="text-[11px] text-emerald-700">
+                              Employee Acknowledged ({String(p.employeeAcknowledgedAt).slice(0, 10)})
+                            </div>
+                          )}
+                          {p.employeeRefusalToSign && (
+                            <div className="text-[11px] text-amber-700">
+                              Refusal to Sign Recorded: {p.refusalReason}
+                            </div>
+                          )}
+                          {p.outcomeRecommendation && (
+                            <div className="text-[11px] text-indigo-700 font-medium">
+                              Human Outcome: {p.outcomeRecommendation} — {p.outcomeNotes}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {p.status === 'ACTIVE' && isAssignedEmployee && !p.employeeAcknowledgedAt && !p.employeeRefusalToSign && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    await apiPost(`/api/v1/performance/pip/${p.id}/acknowledge`, {
+                                      employeeId: p.employeeId,
+                                      comments: 'Acknowledged SMART targets and support plan',
+                                    });
+                                    notify('PIP acknowledged.');
+                                    await refreshEverything();
+                                  } catch (err) {
+                                    notify(err?.message || 'Acknowledge blocked', 'error');
+                                  }
+                                }}
+                                className="px-2.5 py-1 bg-emerald-600 text-white rounded text-[11px]"
+                              >
+                                Acknowledge PIP
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedPip(p);
+                                  setPipRefusalReason('');
+                                  setActionModal('pipRefuse');
+                                }}
+                                className="px-2.5 py-1 border border-amber-400 text-amber-700 rounded text-[11px]"
+                              >
+                                Refuse to Sign
+                              </button>
+                            </>
+                          )}
+                          {p.status === 'ACTIVE' && canCheckInPip && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedPip(p);
+                                setPipCheckInForm((prev) => ({ ...prev, checkInMonth: 1 }));
+                                setActionModal('pipCheckIn');
+                              }}
+                              className="px-2.5 py-1 bg-[#0088ff] text-white rounded text-[11px]"
+                            >
+                              Log Check-In
+                            </button>
+                          )}
+                          {p.status === 'ACTIVE' && canDecidePip && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedPip(p);
+                                setActionModal('pipOutcome');
+                              }}
+                              className="px-2.5 py-1 bg-indigo-600 text-white rounded text-[11px]"
+                            >
+                              Authorize Outcome
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {Array.isArray(p.checkIns) && p.checkIns.length > 0 && (
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {p.checkIns.map((ci) => (
+                            <span key={ci.id} className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px]">
+                              Month {ci.checkInMonth}: <b>{ci.progressStatus}</b>{ci.conductedDate ? ' ✓' : ' (Scheduled)'}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>
         )}
 
-        {/* Appraisal Lifecycle Action Modal (Self | Manager | 1:1 Meeting | Moderate) */}
+        {opsSubTab === 'development' && (
+          <div className="space-y-4">
+            {canManageDev && (
+              <div className="bg-white rounded-md border border-slate-200 p-5 space-y-3">
+                <h4 className="font-semibold text-slate-800">Record Development Action</h4>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">
+                  {employees.length > 0 ? (
+                    <select value={devForm.employeeId} onChange={(e) => setDevForm({ ...devForm, employeeId: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
+                      {employees.map((em) => <option key={em.id} value={em.id}>{formatEmployeeOption(em)}</option>)}
+                    </select>
+                  ) : (
+                    <input type="text" readOnly value={myDisplayName} className="px-2.5 py-1.5 border border-slate-200 rounded bg-slate-50 text-slate-600" />
+                  )}
+                  <input type="text" value={devForm.objective} onChange={(e) => setDevForm({ ...devForm, objective: e.target.value })} placeholder="Development Objective" className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                  <input type="date" value={devForm.targetDate} onChange={(e) => setDevForm({ ...devForm, targetDate: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                </div>
+                <input type="text" value={devForm.actionDescription} onChange={(e) => setDevForm({ ...devForm, actionDescription: e.target.value })} placeholder="Action Description (min 5 chars)" className="w-full px-2.5 py-1.5 border border-slate-300 rounded" />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const act = await apiPost('/api/v1/performance/development/actions', {
+                        ...devForm,
+                        employeeId: devForm.employeeId || actorEmployeeId || employees[0]?.id,
+                      });
+                      notify(`Recorded development action (${act.id.slice(0, 8)}).`);
+                      setLastCreatedObjSetId(act.id);
+                      await refreshEverything();
+                    } catch (err) {
+                      notify(err?.message || 'Failed to record action', 'error');
+                    }
+                  }}
+                  className="px-3.5 py-1.5 bg-[#0088ff] text-white rounded font-medium"
+                >
+                  Add Development Action
+                </button>
+              </div>
+            )}
+
+            <div className="bg-white rounded-md border border-slate-200 p-5 space-y-2.5">
+              <h4 className="font-semibold text-slate-800">Persisted Development Actions ({devActions.length})</h4>
+              {devActions.length === 0 ? (
+                <p className="text-slate-500">No development actions recorded yet.</p>
+              ) : (
+                devActions.map((act) => (
+                  <div key={act.id} className="p-3 border border-slate-200 rounded flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="font-semibold text-slate-800">{act.objective}</div>
+                      <div className="text-[11px] text-slate-600">{act.actionDescription}</div>
+                      <div className="text-[11px] text-slate-500">
+                        {act.developmentPlan?.employee
+                          ? `${act.developmentPlan.employee.firstName} ${act.developmentPlan.employee.lastName} • `
+                          : ''}
+                        Due: {String(act.targetDate).slice(0, 10)} • Status: <b>{act.isCompleted ? 'COMPLETED' : 'PENDING'}</b>
+                      </div>
+                      {act.evidence && <div className="text-[11px] text-emerald-700">Evidence: {act.evidence}</div>}
+                    </div>
+                    {!act.isCompleted && canManageDev && (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={devEvidenceMap[act.id] ?? 'Verified CPE certificate uploaded to HR vault'}
+                          onChange={(e) => setDevEvidenceMap((prev) => ({ ...prev, [act.id]: e.target.value }))}
+                          className="px-2 py-1 border border-slate-300 rounded text-[11px] w-60"
+                        />
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await apiPatch(`/api/v1/performance/development/actions/${act.id}/complete`, {
+                                evidence: devEvidenceMap[act.id] || 'Verified completion evidence',
+                              });
+                              notify('Development action marked complete.');
+                              await refreshEverything();
+                            } catch (err) {
+                              notify(err?.message || 'Completion update failed', 'error');
+                            }
+                          }}
+                          className="px-3 py-1 bg-emerald-600 text-white rounded text-[11px] font-medium"
+                        >
+                          Mark Complete
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Appraisal & PIP Action Modal */}
         {actionModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
             <div className="bg-white rounded-lg border border-slate-200 shadow-2xl max-w-lg w-full p-5 space-y-3">
               <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                <h4 className="text-sm font-semibold text-slate-800 uppercase">{actionModal} Appraisal Step</h4>
+                <h4 className="text-sm font-semibold text-slate-800 uppercase">{actionModal} Action</h4>
                 <button type="button" onClick={() => setActionModal(null)}><X size={15} /></button>
               </div>
               {actionModal === 'self' && (
@@ -1122,25 +1655,36 @@ export default function PerformanceView({
                   <select value={selfForm.cycleId} onChange={(e) => setSelfForm({ ...selfForm, cycleId: e.target.value })} className="w-full px-2.5 py-1.5 border border-slate-300 rounded bg-white">
                     {performanceCycles.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
                   </select>
-                  <select value={selfForm.employeeId} onChange={(e) => setSelfForm({ ...selfForm, employeeId: e.target.value })} className="w-full px-2.5 py-1.5 border border-slate-300 rounded bg-white">
-                    {employees.map((em) => <option key={em.id} value={em.id}>{em.firstName || em.fullName} {em.lastName || ''}</option>)}
-                  </select>
-                  <textarea rows={2} value={selfForm.selfAchievements} onChange={(e) => setSelfForm({ ...selfForm, selfAchievements: e.target.value })} className="w-full px-2.5 py-1.5 border border-slate-300 rounded" />
+                  {employees.length > 0 ? (
+                    <select value={effectiveSelfEmpId} onChange={(e) => setSelfForm({ ...selfForm, employeeId: e.target.value })} className="w-full px-2.5 py-1.5 border border-slate-300 rounded bg-white">
+                      {employees.map((em) => <option key={em.id} value={em.id}>{formatEmployeeOption(em)}</option>)}
+                    </select>
+                  ) : (
+                    <input type="text" readOnly value={myDisplayName} className="w-full px-2.5 py-1.5 border border-slate-200 rounded bg-slate-50 text-slate-600" />
+                  )}
+                  <textarea rows={2} value={selfForm.selfAchievements} onChange={(e) => setSelfForm({ ...selfForm, selfAchievements: e.target.value })} placeholder="Key achievements" className="w-full px-2.5 py-1.5 border border-slate-300 rounded" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="text" value={selfForm.strength1} onChange={(e) => setSelfForm({ ...selfForm, strength1: e.target.value })} placeholder="Key Strength #1" className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                    <input type="text" value={selfForm.strength2} onChange={(e) => setSelfForm({ ...selfForm, strength2: e.target.value })} placeholder="Key Strength #2" className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                    <input type="text" value={selfForm.imp1} onChange={(e) => setSelfForm({ ...selfForm, imp1: e.target.value })} placeholder="Improvement Area #1" className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                    <input type="text" value={selfForm.imp2} onChange={(e) => setSelfForm({ ...selfForm, imp2: e.target.value })} placeholder="Improvement Area #2" className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                  </div>
+                  <input type="text" value={selfForm.selfChallenges} onChange={(e) => setSelfForm({ ...selfForm, selfChallenges: e.target.value })} placeholder="Challenges faced" className="w-full px-2.5 py-1.5 border border-slate-300 rounded" />
                   <button
                     type="button"
                     onClick={async () => {
                       try {
                         await apiPost('/api/v1/performance/appraisals/self', {
-                          cycleId: selfForm.cycleId,
-                          employeeId: selfForm.employeeId,
+                          cycleId: selfForm.cycleId || performanceCycles[0]?.id,
+                          employeeId: effectiveSelfEmpId,
                           selfAchievements: selfForm.selfAchievements,
-                          selfStrengths: [selfForm.strength1, selfForm.strength2],
-                          selfImprovementAreas: [selfForm.imp1, selfForm.imp2],
+                          selfStrengths: [selfForm.strength1, selfForm.strength2].filter(Boolean),
+                          selfImprovementAreas: [selfForm.imp1, selfForm.imp2].filter(Boolean),
                           selfChallenges: selfForm.selfChallenges,
                         });
                         notify('Self-appraisal submitted.');
                         setActionModal(null);
-                        onRefreshAll && onRefreshAll();
+                        await refreshEverything();
                       } catch (err) {
                         notify(err?.message || 'Submission failed', 'error');
                       }
@@ -1153,22 +1697,39 @@ export default function PerformanceView({
               )}
               {actionModal === 'manager' && selectedAppraisal && (
                 <div className="space-y-2">
-                  <label className="block text-slate-600">Rating (1 to 6)</label>
-                  <input type="number" min="1" max="6" value={mgrForm.managerRatingCode} onChange={(e) => setMgrForm({ ...mgrForm, managerRatingCode: Number(e.target.value) })} className="w-full px-2.5 py-1.5 border border-slate-300 rounded" />
-                  <textarea rows={2} value={mgrForm.managerAchievementsComments} onChange={(e) => setMgrForm({ ...mgrForm, managerAchievementsComments: e.target.value })} className="w-full px-2.5 py-1.5 border border-slate-300 rounded" />
+                  <label className="block text-slate-600">Rating Scale (1 to 6)</label>
+                  <select value={mgrForm.managerRatingCode} onChange={(e) => setMgrForm({ ...mgrForm, managerRatingCode: Number(e.target.value) })} className="w-full px-2.5 py-1.5 border border-slate-300 rounded bg-white">
+                    {(ratingScales.length ? ratingScales : [
+                      { code: 1, label: 'Too Early to Assess' },
+                      { code: 2, label: 'Unsatisfactory' },
+                      { code: 3, label: 'Developing' },
+                      { code: 4, label: 'Good / Fully Meets Expectations' },
+                      { code: 5, label: 'Very Good / Exceeds Expectations' },
+                      { code: 6, label: 'Outstanding' },
+                    ]).map((rs) => (
+                      <option key={rs.code} value={rs.code}>{rs.code} — {rs.label}</option>
+                    ))}
+                  </select>
+                  <textarea rows={2} value={mgrForm.managerAchievementsComments} onChange={(e) => setMgrForm({ ...mgrForm, managerAchievementsComments: e.target.value })} placeholder="Manager achievements evaluation" className="w-full px-2.5 py-1.5 border border-slate-300 rounded" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="text" value={mgrForm.s1} onChange={(e) => setMgrForm({ ...mgrForm, s1: e.target.value })} placeholder="Manager Strength #1" className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                    <input type="text" value={mgrForm.s2} onChange={(e) => setMgrForm({ ...mgrForm, s2: e.target.value })} placeholder="Manager Strength #2" className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                    <input type="text" value={mgrForm.i1} onChange={(e) => setMgrForm({ ...mgrForm, i1: e.target.value })} placeholder="Improvement Area #1" className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                    <input type="text" value={mgrForm.i2} onChange={(e) => setMgrForm({ ...mgrForm, i2: e.target.value })} placeholder="Improvement Area #2" className="px-2.5 py-1.5 border border-slate-300 rounded" />
+                  </div>
                   <button
                     type="button"
                     onClick={async () => {
                       try {
                         await apiPost(`/api/v1/performance/appraisals/${selectedAppraisal.id}/manager`, {
                           managerAchievementsComments: mgrForm.managerAchievementsComments,
-                          managerStrengths: [mgrForm.s1, mgrForm.s2],
-                          managerImprovementAreas: [mgrForm.i1, mgrForm.i2],
+                          managerStrengths: [mgrForm.s1, mgrForm.s2].filter(Boolean),
+                          managerImprovementAreas: [mgrForm.i1, mgrForm.i2].filter(Boolean),
                           managerRatingCode: mgrForm.managerRatingCode,
                         });
                         notify('Manager evaluation recorded.');
                         setActionModal(null);
-                        onRefreshAll && onRefreshAll();
+                        await refreshEverything();
                       } catch (err) {
                         notify(err?.message || 'Manager review blocked', 'error');
                       }
@@ -1191,7 +1752,7 @@ export default function PerformanceView({
                         await apiPost(`/api/v1/performance/appraisals/${selectedAppraisal.id}/meeting`, meetingForm);
                         notify('Formal 1:1 review meeting recorded.');
                         setActionModal(null);
-                        onRefreshAll && onRefreshAll();
+                        await refreshEverything();
                       } catch (err) {
                         notify(err?.message || 'Meeting recording failed', 'error');
                       }
@@ -1214,7 +1775,7 @@ export default function PerformanceView({
                         await apiPost(`/api/v1/performance/appraisals/${selectedAppraisal.id}/moderate`, modForm);
                         notify('HR moderation applied.');
                         setActionModal(null);
-                        onRefreshAll && onRefreshAll();
+                        await refreshEverything();
                       } catch (err) {
                         notify(err?.message || 'Moderation failed', 'error');
                       }
@@ -1222,6 +1783,95 @@ export default function PerformanceView({
                     className="px-4 py-1.5 bg-[#0088ff] text-white rounded font-medium"
                   >
                     Save Moderation
+                  </button>
+                </div>
+              )}
+              {actionModal === 'pipCheckIn' && selectedPip && (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <select value={pipCheckInForm.checkInMonth} onChange={(e) => setPipCheckInForm({ ...pipCheckInForm, checkInMonth: Number(e.target.value) })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
+                      {Array.from({ length: selectedPip.durationMonths || 3 }, (_, idx) => idx + 1).map((m) => (
+                        <option key={m} value={m}>Month {m}</option>
+                      ))}
+                    </select>
+                    <select value={pipCheckInForm.progressStatus} onChange={(e) => setPipCheckInForm({ ...pipCheckInForm, progressStatus: e.target.value })} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
+                      <option value="SATISFACTORY">SATISFACTORY</option>
+                      <option value="PARTIAL">PARTIAL</option>
+                      <option value="UNSATISFACTORY">UNSATISFACTORY</option>
+                    </select>
+                  </div>
+                  <textarea rows={2} value={pipCheckInForm.managerReviewEvidence} onChange={(e) => setPipCheckInForm({ ...pipCheckInForm, managerReviewEvidence: e.target.value })} placeholder="Manager review evidence (min 5 chars)" className="w-full px-2.5 py-1.5 border border-slate-300 rounded" />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await apiPost(`/api/v1/performance/pip/${selectedPip.id}/check-ins`, {
+                          checkInMonth: pipCheckInForm.checkInMonth,
+                          scheduledDate: pipCheckInForm.scheduledDate,
+                          managerReviewEvidence: pipCheckInForm.managerReviewEvidence,
+                          progressStatus: pipCheckInForm.progressStatus,
+                        });
+                        notify(`Month ${pipCheckInForm.checkInMonth} PIP check-in logged.`);
+                        setActionModal(null);
+                        await refreshEverything();
+                      } catch (err) {
+                        notify(err?.message || 'Check-in failed', 'error');
+                      }
+                    }}
+                    className="px-4 py-1.5 bg-[#0088ff] text-white rounded font-medium"
+                  >
+                    Submit Check-In
+                  </button>
+                </div>
+              )}
+              {actionModal === 'pipOutcome' && selectedPip && (
+                <div className="space-y-2">
+                  <select value={pipOutcomeForm.outcomeRecommendation} onChange={(e) => setPipOutcomeForm({ ...pipOutcomeForm, outcomeRecommendation: e.target.value })} className="w-full px-2.5 py-1.5 border border-slate-300 rounded bg-white">
+                    <option value="CLEARANCE">CLEARANCE (Successful Completion)</option>
+                    <option value="FURTHER_REVIEW">FURTHER_REVIEW (Extend)</option>
+                    <option value="REFERRAL_TO_FAIR_HEARING">REFERRAL_TO_FAIR_HEARING</option>
+                  </select>
+                  <textarea rows={2} value={pipOutcomeForm.outcomeNotes} onChange={(e) => setPipOutcomeForm({ ...pipOutcomeForm, outcomeNotes: e.target.value })} placeholder="Human authority decision notes (min 5 chars)" className="w-full px-2.5 py-1.5 border border-slate-300 rounded" />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await apiPost(`/api/v1/performance/pip/${selectedPip.id}/outcome`, pipOutcomeForm);
+                        notify('PIP outcome authorized.');
+                        setActionModal(null);
+                        await refreshEverything();
+                      } catch (err) {
+                        notify(err?.message || 'Outcome failed', 'error');
+                      }
+                    }}
+                    className="px-4 py-1.5 bg-indigo-600 text-white rounded font-medium"
+                  >
+                    Authorize Human Outcome
+                  </button>
+                </div>
+              )}
+              {actionModal === 'pipRefuse' && selectedPip && (
+                <div className="space-y-2">
+                  <textarea rows={3} value={pipRefusalReason} onChange={(e) => setPipRefusalReason(e.target.value)} placeholder="Document reason for refusing to sign PIP (PIP remains active)" className="w-full px-2.5 py-1.5 border border-slate-300 rounded" />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await apiPost(`/api/v1/performance/pip/${selectedPip.id}/acknowledge`, {
+                          employeeId: selectedPip.employeeId,
+                          refuseToSign: true,
+                          refusalReason: pipRefusalReason,
+                        });
+                        notify('Refusal to sign recorded.');
+                        setActionModal(null);
+                        await refreshEverything();
+                      } catch (err) {
+                        notify(err?.message || 'Refusal recording failed', 'error');
+                      }
+                    }}
+                    className="px-4 py-1.5 bg-amber-600 text-white rounded font-medium"
+                  >
+                    Record Refusal to Sign
                   </button>
                 </div>
               )}
@@ -1234,23 +1884,31 @@ export default function PerformanceView({
             <div className="w-full max-w-2xl bg-white h-full shadow-2xl flex flex-col animate-fadeIn">
               <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-slate-800">
-                  6-Objective SMART Goal Sheet (Total Weight: 100%)
+                  {amendMode ? 'Amend Approved 6-Objective Goal Sheet' : '6-Objective SMART Goal Sheet (Total Weight: 100%)'}
                 </h3>
                 <button
                   type="button"
-                  onClick={() => setGoalModalOpen(false)}
+                  onClick={() => {
+                    setAmendMode(false);
+                    setGoalModalOpen(false);
+                  }}
                   className="text-slate-400 hover:text-slate-700"
                 >
                   <X size={16} />
                 </button>
               </div>
-              <div className="px-6 pt-4 grid grid-cols-2 gap-3 text-xs">
-                <select value={goalEmployeeId} onChange={(e) => setGoalEmployeeId(e.target.value)} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
-                  {employees.map((em) => <option key={em.id} value={em.id}>{em.firstName || em.fullName} {em.lastName || ''}</option>)}
-                </select>
+              <div className="px-6 pt-4 grid grid-cols-3 gap-3 text-xs">
+                {employees.length > 0 ? (
+                  <select value={effectiveGoalEmpId} onChange={(e) => setGoalEmployeeId(e.target.value)} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
+                    {employees.map((em) => <option key={em.id} value={em.id}>{formatEmployeeOption(em)}</option>)}
+                  </select>
+                ) : (
+                  <input type="text" readOnly value={myDisplayName} className="px-2.5 py-1.5 border border-slate-200 rounded bg-slate-50 text-slate-600" />
+                )}
                 <select value={goalCycleId} onChange={(e) => setGoalCycleId(e.target.value)} className="px-2.5 py-1.5 border border-slate-300 rounded bg-white">
                   {performanceCycles.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
                 </select>
+                <input type="text" value={goalSheetTitle} onChange={(e) => setGoalSheetTitle(e.target.value)} placeholder="Goal Sheet Title" className="px-2.5 py-1.5 border border-slate-300 rounded" />
               </div>
               <div className="flex-1 overflow-y-auto p-6 space-y-3 text-xs">
                 {objectives.map((obj, i) => (
@@ -1282,64 +1940,66 @@ export default function PerformanceView({
                   </div>
                 ))}
               </div>
-              <div className="px-6 py-3 border-t border-slate-200 flex items-center justify-between gap-2.5">
+              <div className="px-6 py-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2.5">
                 {(() => {
                   const totalW = objectives.reduce((s, o) => s + Number(o.weight || 0), 0);
-                  const validWeight = totalW === 100;
+                  const validWeight = Math.abs(totalW - 100) < 0.01;
                   return (
                     <>
                       <span className={`text-xs font-semibold ${validWeight ? 'text-emerald-700' : 'text-rose-600'}`}>
                         Total Weight: {totalW}% {validWeight ? '✓' : '(must equal 100%)'}
                       </span>
-                      <button
-                        type="button"
-                        disabled={!validWeight}
-                        onClick={async () => {
-                          if (!validWeight) return;
-                    try {
-                      const created = await apiPost('/api/v1/performance/objectives', {
-                        employeeId: goalEmployeeId || selectedAppraisal?.employeeId || employees[0]?.id,
-                        cycleId: goalCycleId || undefined,
-                        title: '2026 Performance Goal Sheet',
-                        objectives: objectives.map((o) => ({
-                          title: o.title,
-                          kpi: 'Measurable engagement KPI attainment',
-                          behavioursAndValues: 'Ndakala Six Core Values',
-                          expectedDate: '2026-12-31',
-                          weightPercent: o.weight,
-                          isRealistic: true,
-                        })),
-                      });
-                      await apiPost(`/api/v1/performance/objectives/${created.id}/submit`, {}).catch(() => null);
-                      notify('6-Objective SMART Goal Sheet saved & submitted for approval.');
-                      setGoalModalOpen(false);
-                      onRefreshAll && onRefreshAll();
-                    } catch (err) {
-                      notify(err?.message || 'Failed to save goal sheet', 'error');
-                    }
-                  }}
-                  className="px-4 py-1.5 bg-[#0088ff] text-white text-xs font-medium rounded disabled:opacity-50"
-                >
-                  Save & Submit Goal Sheet
-                </button>
+                      {!amendMode && (
+                        <button
+                          type="button"
+                          disabled={!validWeight}
+                          onClick={async () => {
+                            if (!validWeight) return;
+                            try {
+                              const created = await apiPost('/api/v1/performance/objectives', {
+                                employeeId: effectiveGoalEmpId,
+                                cycleId: goalCycleId || performanceCycles[0]?.id || undefined,
+                                title: goalSheetTitle.trim() || '2026 Performance Goal Sheet',
+                                objectives: objectives.map((o) => ({
+                                  title: o.title,
+                                  kpi: 'Measurable engagement KPI attainment',
+                                  behavioursAndValues: 'Ndakala Six Core Values',
+                                  expectedDate: '2026-12-31',
+                                  weightPercent: o.weight,
+                                  isRealistic: true,
+                                })),
+                              });
+                              await apiPost(`/api/v1/performance/objectives/${created.id}/submit`, {});
+                              notify('6-Objective SMART Goal Sheet saved & submitted for approval.');
+                              setGoalModalOpen(false);
+                              setOpsSubTab('objectives');
+                              await refreshEverything();
+                            } catch (err) {
+                              notify(err?.message || 'Failed to save goal sheet', 'error');
+                            }
+                          }}
+                          className="px-4 py-1.5 bg-[#0088ff] text-white text-xs font-medium rounded disabled:opacity-50"
+                        >
+                          Save & Submit Goal Sheet
+                        </button>
+                      )}
                     </>
                   );
                 })()}
-                <button
-                  type="button"
-                  onClick={() => {
-                    const defaultSheet =
-                      selectedAppraisalDetail?.objectiveSheetId ||
-                      selectedAppraisal?.objectiveSheetId ||
-                      appraisals.find((a) => a.objectiveSheetId)?.objectiveSheetId ||
-                      '';
-                    setAmendSheetId(defaultSheet);
-                    setAmendMode((m) => !m);
-                  }}
-                  className="px-4 py-1.5 bg-amber-600 text-white text-xs font-medium rounded"
-                >
-                  {amendMode ? 'Hide Amendment Form' : 'Amend Approved Sheet'}
-                </button>
+                {canApproveObjectives && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!amendSheetId && objectiveSets.find((s) => s.status === 'APPROVED')?.id) {
+                        setAmendSheetId(objectiveSets.find((s) => s.status === 'APPROVED').id);
+                      }
+                      setAmendMode((m) => !m);
+                    }}
+                    className="px-4 py-1.5 bg-amber-600 text-white text-xs font-medium rounded"
+                  >
+                    {amendMode ? 'Hide Amendment Form' : 'Amend Approved Sheet'}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -1352,19 +2012,26 @@ export default function PerformanceView({
                 </button>
               </div>
 
-              {amendMode && (
-                <div className="p-3.5 rounded-md border border-amber-200 bg-amber-50/50 space-y-2.5 text-xs">
-                  <p className="font-semibold text-amber-900">Amend Approved Objective Sheet</p>
+              {amendMode && canApproveObjectives && (
+                <div className="p-4 border-t border-amber-200 bg-amber-50/50 space-y-2.5 text-xs">
+                  <p className="font-semibold text-amber-900">Amend Approved Objective Sheet (Creates New Version)</p>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                     <div>
-                      <label className="block text-[11px] font-medium text-slate-700 mb-1">Objective Sheet ID</label>
-                      <input
-                        type="text"
-                        placeholder="Paste or select Objective Sheet UUID"
+                      <label className="block text-[11px] font-medium text-slate-700 mb-1">Approved Objective Sheet</label>
+                      <select
                         value={amendSheetId}
                         onChange={(e) => setAmendSheetId(e.target.value)}
-                        className="w-full px-2.5 py-1.5 border border-slate-300 rounded bg-white font-mono"
-                      />
+                        className="w-full px-2.5 py-1.5 border border-slate-300 rounded bg-white"
+                      >
+                        <option value="">Select Approved Sheet</option>
+                        {objectiveSets
+                          .filter((s) => s.status === 'APPROVED')
+                          .map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.title} (v{s.version}) — {s.employee?.firstName} {s.employee?.lastName}
+                            </option>
+                          ))}
+                      </select>
                     </div>
                     <div>
                       <label className="block text-[11px] font-medium text-slate-700 mb-1">Amendment Reason (min 5 chars)</label>
@@ -1381,7 +2048,7 @@ export default function PerformanceView({
                       type="button"
                       onClick={async () => {
                         if (!amendSheetId.trim()) {
-                          notify('Objective Sheet ID is required.', 'error');
+                          notify('Please select an approved Objective Sheet.', 'error');
                           return;
                         }
                         try {
@@ -1396,10 +2063,11 @@ export default function PerformanceView({
                               isRealistic: true,
                             })),
                           });
-                          notify('Objective sheet amended safely.');
+                          notify('Objective sheet amended (new version approved; prior version preserved as SUPERSEDED).');
                           setAmendMode(false);
                           setGoalModalOpen(false);
-                          onRefreshAll && onRefreshAll();
+                          setOpsSubTab('objectives');
+                          await refreshEverything();
                         } catch (err) {
                           notify(err?.message || 'Amendment failed', 'error');
                         }
@@ -1419,6 +2087,25 @@ export default function PerformanceView({
   }
 
   // ==================== 3. NDakala 14-TAB PERFORMANCE SETTINGS ====================
+  if (!canEditPerfSettings) {
+    return (
+      <div className="flex-1 bg-[#edf1f7] p-8 flex items-center justify-center">
+        <div className="bg-white rounded-md border border-amber-200 p-6 max-w-md text-center space-y-3">
+          <h4 className="text-sm font-semibold text-slate-800">Restricted (RBAC): Performance Settings</h4>
+          <p className="text-xs text-slate-600">
+            Organization-wide performance templates, methods, and matrix configurations require HR Lead or Executive permission.
+          </p>
+          <button
+            type="button"
+            onClick={() => setTopContextTab && setTopContextTab('appraisals')}
+            className="px-4 py-1.5 bg-[#0088ff] text-white text-xs font-medium rounded"
+          >
+            Return to My Appraisals & Goals
+          </button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-1 h-full bg-[#edf1f7] overflow-hidden relative">
       {/* Top-center E-Signature error banner when triggered */}
