@@ -73,6 +73,7 @@ export default function LeaveRequestModal({
   const [calcPreview, setCalcPreview] = useState(null);
   const [teamEmail, setTeamEmail] = useState('');
   const [leaveTypesList, setLeaveTypesList] = useState([]);
+  const [relievingOfficers, setRelievingOfficers] = useState([]);
   const [uploadingEvidence, setUploadingEvidence] = useState(false);
 
   const selectedCode = leaveForm.leaveTypeCode || 'ANNUAL';
@@ -87,6 +88,12 @@ export default function LeaveRequestModal({
       .then((res) => {
         const list = unwrapList(res);
         if (list.length > 0) setLeaveTypesList(list);
+      })
+      .catch(() => {});
+    apiGet('/api/v1/leave/relieving-officers')
+      .then((res) => {
+        const list = unwrapList(res);
+        if (list.length > 0) setRelievingOfficers(list);
       })
       .catch(() => {});
   }, [isOpen]);
@@ -167,7 +174,8 @@ export default function LeaveRequestModal({
   const requiresHandover = chargeableDays >= 5;
   const requiresEvidence = Boolean(selectedLeaveType?.requiresEvidence);
 
-  const colleagues = employees.filter((e) => e.id !== resolvedEmpId);
+  const colleagueSource = relievingOfficers.length > 0 ? relievingOfficers : employees;
+  const colleagues = colleagueSource.filter((e) => e.id !== resolvedEmpId);
   const overlappingExisting = leaveForm.editingRequestId
     ? []
     : findOverlappingLeaveRequests(

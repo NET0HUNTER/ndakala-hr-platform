@@ -610,5 +610,16 @@ describe('Leave Management, Ledger Invariants & Work Arrangements (Phase 3)', ()
       expect(revAbs.status).toBe(200);
       expect(revAbs.body.data.status).toBe('EXCUSED');
     });
+
+    it('exposes sanitized relieving-officer list to employees for 5+ day handover leave', async () => {
+      const colRes = await employeeClient.agent.get('/api/v1/leave/relieving-officers');
+      expect(colRes.status).toBe(200);
+      expect(Array.isArray(colRes.body.data)).toBe(true);
+      expect(colRes.body.data.length).toBeGreaterThan(0);
+      // Should not include self or expose nationalId/salary
+      expect(colRes.body.data.some((e: any) => e.id === testEmployeeId)).toBe(false);
+      expect(colRes.body.data[0].fullName).toBeDefined();
+      expect(colRes.body.data[0].nationalId).toBeUndefined();
+    });
   });
 });

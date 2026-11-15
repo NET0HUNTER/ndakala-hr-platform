@@ -127,8 +127,11 @@ export default function App() {
   };
 
   const fetchAllData = useCallback(async (userOverride = null) => {
+    const perms = new Set(userOverride?.permissions || []);
+    const canViewEmployees =
+      perms.size === 0 || perms.has('employees.view') || perms.has('employees.view_team');
     const endpoints = [
-      ['/api/v1/employees?limit=100', setEmployees],
+      ...(canViewEmployees ? [['/api/v1/employees?limit=100', setEmployees]] : []),
       ['/api/v1/leave/balances', setLeaveBalances],
       ['/api/v1/leave/requests', setLeaveRequests],
       ['/api/v1/leave/ledger', setLeaveLedger],
@@ -164,16 +167,27 @@ export default function App() {
 
     const empResult = results.find(([u]) => u.startsWith('/api/v1/employees'));
     const empList = empResult ? empResult[1] : [];
-    if (empList.length > 0) {
-      setCurrentUser((prev) => {
-        const target = userOverride || prev;
-        if (!target) return target;
-        const matched = empList.find(
-          (emp) => emp.workEmail?.toLowerCase() === target.email?.toLowerCase()
-        );
-        return matched ? { ...target, employeeId: matched.id, fullName: matched.fullName || `${matched.firstName} ${matched.lastName}` } : target;
-      });
-    }
+    const balResult = results.find(([u]) => u.startsWith('/api/v1/leave/balances'));
+    const balList = balResult ? balResult[1] : [];
+    const reqResult = results.find(([u]) => u.startsWith('/api/v1/leave/requests'));
+    const reqList = reqResult ? reqResult[1] : [];
+    setCurrentUser((prev) => {
+      const target = userOverride || prev;
+      if (!target) return target;
+      const matched = empList.find(
+        (emp) => emp.workEmail?.toLowerCase() === target.email?.toLowerCase()
+      );
+      if (matched) {
+        return {
+          ...target,
+          employeeId: matched.id,
+          fullName: matched.fullName || `${matched.firstName} ${matched.lastName}`,
+        };
+      }
+      const inferredEmpId =
+        target.employeeId || balList[0]?.employeeId || reqList[0]?.employeeId || null;
+      return inferredEmpId ? { ...target, employeeId: inferredEmpId } : target;
+    });
   }, []);
 
   const hydrateSession = useCallback(async () => {

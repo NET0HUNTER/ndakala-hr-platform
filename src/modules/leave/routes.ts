@@ -50,6 +50,43 @@ export function createLeaveRouter(deps: AppDeps): Router {
     },
   });
 
+  // 1b. List Safe Handover / Relieving Officer Colleagues (accessible to all leave requesters)
+  registerRoute(router, deps, {
+    method: 'get',
+    path: '/leave/relieving-officers',
+    auth: { permission: 'leave.request' },
+    handler: async ({ auth, deps }) => {
+      const myEmpId = await getActorEmployeeId(deps.prisma, auth.userId);
+      const rows = await deps.prisma.employee.findMany({
+        where: {
+          isActive: true,
+          status: { in: ['ACTIVE', 'PROBATION'] },
+          ...(myEmpId ? { id: { not: myEmpId } } : {}),
+        },
+        select: {
+          id: true,
+          employeeNumber: true,
+          firstName: true,
+          lastName: true,
+          preferredName: true,
+          department: { select: { name: true } },
+          position: { select: { title: true } },
+        },
+        orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+        take: 200,
+      });
+      return rows.map((emp) => ({
+        id: emp.id,
+        employeeNumber: emp.employeeNumber,
+        firstName: emp.firstName,
+        lastName: emp.lastName,
+        fullName: `${emp.firstName} ${emp.lastName}`.trim(),
+        jobTitle: emp.position?.title || null,
+        department: emp.department ? { name: emp.department.name } : null,
+      }));
+    },
+  });
+
   // 2. Draft New Leave Type (Maker-Checker)
   registerRoute(router, deps, {
     method: 'post',
