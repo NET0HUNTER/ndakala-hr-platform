@@ -14,12 +14,14 @@ export interface AuthContext {
 
 const sha256 = (str: string): string => crypto.createHash('sha256').update(str).digest('hex');
 
+const DEFAULT_SESSION_TTL_HOURS = 168; // 7 days sliding session window
+
 export async function createSession(
   prisma: PrismaClient,
   userId: string,
   ip?: string,
   userAgent?: string,
-  ttlHours = 8,
+  ttlHours = DEFAULT_SESSION_TTL_HOURS,
 ): Promise<{ token: string; csrfToken: string; expiresAt: Date; sessionId: string }> {
   const token = crypto.randomBytes(32).toString('base64url');
   const csrfToken = crypto.randomBytes(32).toString('base64url');
@@ -75,11 +77,15 @@ export async function resolveSession(
     return null;
   }
 
-  // Touch lastSeenAt every 5 minutes if needed
+  // Slide session window forward and touch lastSeenAt every 5 minutes of activity
   if (now.getTime() - session.lastSeenAt.getTime() > 300_000) {
+    const slidingExpiresAt = new Date(now.getTime() + DEFAULT_SESSION_TTL_HOURS * 3600 * 1000);
     await prisma.session.update({
       where: { id: session.id },
-      data: { lastSeenAt: now },
+      data: {
+        lastSeenAt: now,
+        expiresAt: slidingExpiresAt > session.expiresAt ? slidingExpiresAt : session.expiresAt,
+      },
     });
   }
 

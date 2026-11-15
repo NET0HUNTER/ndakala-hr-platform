@@ -18,7 +18,7 @@ import LeaveRequestModal, {
 import UnexpectedAbsenceModal from './views/modals/UnexpectedAbsenceModal';
 import WhistleblowerModal from './views/modals/WhistleblowerModal';
 import PayslipModal from './views/modals/PayslipModal';
-import { apiGet, apiPost, apiPatch, apiDownload, unwrapList, setCsrfToken } from './utils/api';
+import { apiGet, apiPost, apiPatch, apiDownload, unwrapList, setCsrfToken, setAuthToken } from './utils/api';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -174,6 +174,7 @@ export default function App() {
       const me = await apiGet('/api/v1/auth/me');
       if (!me?.user) {
         setCurrentUser(null);
+        setAuthToken(null);
         setCsrfToken(null);
         return;
       }
@@ -189,6 +190,7 @@ export default function App() {
       await fetchAllData(userObj);
     } catch (_err) {
       setCurrentUser(null);
+      setAuthToken(null);
       setCsrfToken(null);
     } finally {
       setAuthChecking(false);
@@ -198,6 +200,24 @@ export default function App() {
   useEffect(() => {
     hydrateSession();
   }, [hydrateSession]);
+
+  useEffect(() => {
+    const onUnauthorized = () => {
+      setAuthToken(null);
+      setCsrfToken(null);
+      setCurrentUser((prev) => {
+        if (prev) {
+          showToast(
+            'Your session expired — please sign in again. Your draft has been saved locally.',
+            'error',
+          );
+        }
+        return null;
+      });
+    };
+    window.addEventListener('ndakala:unauthorized', onUnauthorized);
+    return () => window.removeEventListener('ndakala:unauthorized', onUnauthorized);
+  }, [showToast]);
 
   const handleLogin = async (emailArg, passwordArg, mfaCodeArg) => {
     if (emailArg && typeof emailArg === 'object' && emailArg.preventDefault) {
@@ -225,6 +245,7 @@ export default function App() {
       if (data.mfaRequired) {
         return { mfaRequired: true };
       }
+      if (data.token) setAuthToken(data.token);
       if (data.csrfToken) setCsrfToken(data.csrfToken);
       setLoginPassword('');
       await hydrateSession();
@@ -246,6 +267,7 @@ export default function App() {
     } catch (_err) {
       // Ignore if session already expired
     }
+    setAuthToken(null);
     setCsrfToken(null);
     setCurrentUser(null);
     setLoginEmail('');

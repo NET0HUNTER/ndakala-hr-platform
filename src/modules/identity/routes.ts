@@ -144,6 +144,7 @@ export function createIdentityRouter(deps: AppDeps): Router {
         secure: req.secure || req.get('x-forwarded-proto') === 'https',
         sameSite: 'lax',
         path: '/',
+        maxAge: 7 * 24 * 3600 * 1000,
         expires: expiresAt,
       });
 

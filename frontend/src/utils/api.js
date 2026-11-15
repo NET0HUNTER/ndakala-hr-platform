@@ -1,11 +1,48 @@
-let _csrfToken = null;
+const CSRF_STORAGE_KEY = 'ndakala_csrf_token';
+const AUTH_STORAGE_KEY = 'ndakala_auth_token';
+
+function readStoredToken(key) {
+  try {
+    return typeof window !== 'undefined' && window.localStorage
+      ? window.localStorage.getItem(key)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredToken(key, value) {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    if (value) {
+      window.localStorage.setItem(key, value);
+    } else {
+      window.localStorage.removeItem(key);
+    }
+  } catch {
+    // ignore storage errors in restricted environments
+  }
+}
+
+let _csrfToken = readStoredToken(CSRF_STORAGE_KEY);
+let _authToken = readStoredToken(AUTH_STORAGE_KEY);
 
 export function setCsrfToken(token) {
   _csrfToken = token || null;
+  writeStoredToken(CSRF_STORAGE_KEY, _csrfToken);
 }
 
 export function getCsrfToken() {
   return _csrfToken;
+}
+
+export function setAuthToken(token) {
+  _authToken = token || null;
+  writeStoredToken(AUTH_STORAGE_KEY, _authToken);
+}
+
+export function getAuthToken() {
+  return _authToken;
 }
 
 export function unwrapList(data) {
@@ -17,6 +54,10 @@ export function unwrapList(data) {
 export async function apiRequest(url, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
   const headers = { ...(options.headers || {}) };
+
+  if (_authToken && !headers['Authorization']) {
+    headers['Authorization'] = `Bearer ${_authToken}`;
+  }
 
   const isMutating = method === 'POST' || method === 'PATCH' || method === 'PUT' || method === 'DELETE';
   if (isMutating && _csrfToken && !headers['X-CSRF-Token']) {
@@ -48,6 +89,14 @@ export async function apiRequest(url, options = {}) {
   }
 
   if (!res.ok) {
+    if (
+      res.status === 401 &&
+      !url.includes('/api/v1/auth/login') &&
+      !url.includes('/api/v1/auth/me') &&
+      typeof window !== 'undefined'
+    ) {
+      window.dispatchEvent(new CustomEvent('ndakala:unauthorized', { detail: { url } }));
+    }
     const msg = json?.error?.message || json?.message || `HTTP ${res.status}: ${res.statusText}`;
     const err = new Error(msg);
     err.status = res.status;
@@ -69,8 +118,12 @@ export const apiPut = (url, body) => apiRequest(url, { method: 'PUT', body });
 export const apiDelete = (url) => apiRequest(url, { method: 'DELETE' });
 
 export async function apiDownload(url, defaultFilename = 'export.csv') {
-  const res = await fetch(url, { method: 'GET', credentials: 'include' });
+  const headers = _authToken ? { Authorization: `Bearer ${_authToken}` } : {};
+  const res = await fetch(url, { method: 'GET', headers, credentials: 'include' });
   if (!res.ok) {
+    if (res.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('ndakala:unauthorized', { detail: { url } }));
+    }
     let msg = `Download failed (${res.status})`;
     try {
       const errJson = await res.json();

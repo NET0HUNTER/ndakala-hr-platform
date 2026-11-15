@@ -88,6 +88,180 @@ function getDirectoryCellValue(row, col) {
   }
 }
 
+const CANDIDATE_DRAFT_STORAGE_KEY = 'ndakala_candidate_draft_v1';
+
+const createEmptyEducationRow = () => ({
+  school: '',
+  degree: '',
+  field: '',
+  completionDate: '',
+  notes: '',
+});
+
+const createEmptyExperienceRow = () => ({
+  occupation: '',
+  company: '',
+  summary: '',
+  duration: '',
+  currentlyWorkHere: 'Select',
+  fromDate: '',
+  toDate: '',
+});
+
+const createEmptyDependentRow = () => ({
+  name: '',
+  relationship: 'Select',
+  dob: '',
+});
+
+const createDefaultCandidateForm = () => ({
+  email: '',
+  firstName: '',
+  lastName: '',
+  phoneCode: '+254',
+  phone: '',
+  officialEmail: '',
+  nickName: '',
+  expertise: '',
+  addressLine1: '',
+  addressLine2: '',
+  city: 'Nairobi',
+  country: 'Kenya',
+  state: 'Nairobi County',
+  postalCode: '00100',
+  sameAsPresent: true,
+  experienceYears: '',
+  currentSalary: '',
+  sourceOfHire: 'Direct',
+  skillSet: '',
+  highestQualification: 'BSc',
+  additionalInfo: '',
+  department: 'IT',
+  jobTitle: 'ICT Associate',
+  location: 'Nairobi',
+  hireDate: '2026-11-13',
+  tentativeDate: '2026-11-16',
+  gender: 'Male',
+  maritalStatus: 'Single',
+  aboutMe: '',
+  citizenship: 'Kenyan',
+  dateOfBirth: '1999-01-01',
+  nationalId: '',
+  kraPin: '',
+  nssfNumber: '',
+  shifNumber: '',
+  departmentId: '',
+  positionId: '',
+  gradeId: '',
+  locationId: '',
+  employmentCategoryCode: 'PERMANENT',
+});
+
+const USER_DRAFT_TEXT_FIELDS = [
+  'email',
+  'firstName',
+  'lastName',
+  'phone',
+  'officialEmail',
+  'nickName',
+  'expertise',
+  'addressLine1',
+  'addressLine2',
+  'experienceYears',
+  'currentSalary',
+  'skillSet',
+  'additionalInfo',
+  'aboutMe',
+  'nationalId',
+  'kraPin',
+  'nssfNumber',
+  'shifNumber',
+];
+
+function hasCandidateDraftContent(form, edu = [], exp = [], dep = []) {
+  if (form && typeof form === 'object') {
+    for (const field of USER_DRAFT_TEXT_FIELDS) {
+      if (String(form[field] || '').trim()) return true;
+    }
+    if (form.jobTitle && form.jobTitle !== 'ICT Associate') return true;
+    if (form.city && form.city !== 'Nairobi') return true;
+    if (form.gender && form.gender !== 'Male') return true;
+    if (form.maritalStatus && form.maritalStatus !== 'Single') return true;
+    if (form.dateOfBirth && form.dateOfBirth !== '1999-01-01') return true;
+  }
+  const hasEdu = Array.isArray(edu) && edu.some((r) =>
+    [r?.school, r?.degree, r?.field, r?.completionDate, r?.notes].some((v) => String(v || '').trim()),
+  );
+  const hasExp = Array.isArray(exp) && exp.some((r) =>
+    [r?.occupation, r?.company, r?.summary, r?.duration, r?.fromDate, r?.toDate].some((v) => String(v || '').trim()) ||
+    (r?.currentlyWorkHere && r.currentlyWorkHere !== 'Select'),
+  );
+  const hasDep = Array.isArray(dep) && dep.some((r) =>
+    [r?.name, r?.dob].some((v) => String(v || '').trim()) ||
+    (r?.relationship && r.relationship !== 'Select'),
+  );
+  return hasEdu || hasExp || hasDep;
+}
+
+function readLocalCandidateDraft() {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return null;
+    const raw = window.localStorage.getItem(CANDIDATE_DRAFT_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalCandidateDraft(payload) {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    if (payload) {
+      window.localStorage.setItem(CANDIDATE_DRAFT_STORAGE_KEY, JSON.stringify(payload));
+    } else {
+      window.localStorage.removeItem(CANDIDATE_DRAFT_STORAGE_KEY);
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function parseCsvRow(line) {
+  const cells = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === ',' && !inQuotes) {
+      cells.push(cur.trim());
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  cells.push(cur.trim());
+  return cells;
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      resolve(result.includes(',') ? result.split(',')[1] : result);
+    };
+    reader.onerror = () => reject(new Error(`Unable to read ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function WorkforceDirectoryView({
   employees = [],
   topContextTab = 'onboarding',
@@ -109,6 +283,8 @@ export default function WorkforceDirectoryView({
   const [scopeDropdownOpen, setScopeDropdownOpen] = useState(false);
   const [photoPreview, setPhotoPreview] = useState(null);
   const photoInputRef = useRef(null);
+  const csvImportInputRef = useRef(null);
+  const bulkUploadInputRef = useRef(null);
 
   // View selector dropdown + Create View drawer (07:28 - 07:40 of hr.webm)
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
@@ -144,61 +320,17 @@ export default function WorkforceDirectoryView({
   const [moreActionsOpen, setMoreActionsOpen] = useState(false);
   const moreRef = useRef(null);
 
-  // Full-Screen "Add Candidate" Modal (07:44 - 08:01 of hr.webm)
+  // Full-Screen "Add Candidate / Employee" Modal (07:44 - 08:01 of hr.webm)
   const [addCandidateOpen, setAddCandidateOpen] = useState(false);
-  const [candidateForm, setCandidateForm] = useState({
-    email: '',
-    firstName: '',
-    lastName: '',
-    phoneCode: '+254',
-    phone: '',
-    officialEmail: '',
-    nickName: '',
-    expertise: '',
-    addressLine1: '',
-    addressLine2: '',
-    city: 'Nairobi',
-    country: 'Kenya',
-    state: 'Nairobi County',
-    postalCode: '00100',
-    sameAsPresent: true,
-    experienceYears: '',
-    currentSalary: '',
-    sourceOfHire: 'Direct',
-    skillSet: '',
-    highestQualification: 'BSc',
-    additionalInfo: '',
-    department: 'IT',
-    jobTitle: 'ICT Associate',
-    location: 'Nairobi',
-    hireDate: '2026-11-13',
-    tentativeDate: '2026-11-16',
-    gender: 'Male',
-    maritalStatus: 'Single',
-    aboutMe: '',
-    citizenship: 'Kenyan',
-    dateOfBirth: '1999-01-01',
-    nationalId: '38910293',
-    kraPin: 'A012345678Z',
-    nssfNumber: '20019283',
-    shifNumber: 'SHIF-99182',
-    departmentId: '',
-    positionId: '',
-    gradeId: '',
-    locationId: '',
-    employmentCategoryCode: 'PERMANENT',
-  });
+  const [candidateSubmitting, setCandidateSubmitting] = useState(false);
+  const [draftSaving, setDraftSaving] = useState(false);
+  const [draftSavedAt, setDraftSavedAt] = useState(null);
+  const [candidateForm, setCandidateForm] = useState(createDefaultCandidateForm);
   const [filterStatus, setFilterStatus] = useState('');
 
-  const [educationRows, setEducationRows] = useState([
-    { school: '', degree: '', field: '', completionDate: '', notes: '' },
-  ]);
-  const [experienceRows, setExperienceRows] = useState([
-    { occupation: '', company: '', summary: '', duration: '', currentlyWorkHere: 'Select', fromDate: '', toDate: '' },
-  ]);
-  const [dependentRows, setDependentRows] = useState([
-    { name: '', relationship: 'Select', dob: '' },
-  ]);
+  const [educationRows, setEducationRows] = useState([createEmptyEducationRow()]);
+  const [experienceRows, setExperienceRows] = useState([createEmptyExperienceRow()]);
+  const [dependentRows, setDependentRows] = useState([createEmptyDependentRow()]);
 
   // Employee 360 / Probation Drawer when clicking a row
   const [selectedRecord, setSelectedRecord] = useState(null);
@@ -315,6 +447,41 @@ export default function WorkforceDirectoryView({
     if (onShowToast) onShowToast(msg, type);
   };
 
+  const draftHydratedRef = useRef(false);
+
+  const buildDraftPayload = () => ({
+    ...candidateForm,
+    educationRows,
+    experienceRows,
+    dependentRows,
+    updatedAt: new Date().toISOString(),
+  });
+
+  const resetCandidateFormState = (deptList = departments, posList = positions, grdList = grades, locList = locations, catList = categories) => {
+    setCandidateForm({
+      ...createDefaultCandidateForm(),
+      departmentId: deptList[0]?.id || '',
+      department: deptList[0]?.name || 'IT',
+      positionId: posList[0]?.id || '',
+      gradeId: grdList[0]?.id || '',
+      locationId: locList[0]?.id || '',
+      employmentCategoryCode:
+        catList.find((c) => c.status === 'ACTIVE')?.code || catList[0]?.code || 'PERMANENT',
+    });
+    setEducationRows([createEmptyEducationRow()]);
+    setExperienceRows([createEmptyExperienceRow()]);
+    setDependentRows([createEmptyDependentRow()]);
+    setPhotoPreview(null);
+    setDraftSavedAt(null);
+  };
+
+  const removeTableRow = (setter, idx, createBlankRow) => {
+    setter((prev) => {
+      if (prev.length <= 1) return [createBlankRow()];
+      return prev.filter((_, i) => i !== idx);
+    });
+  };
+
   const loadDirectoryData = async () => {
     try {
       const [depts, pos, grds, locs, cats, tpls, pForms, views, dft] = await Promise.all([
@@ -344,30 +511,81 @@ export default function WorkforceDirectoryView({
       setCustomViews(parsedViews);
       const defView = parsedViews.find((v) => v.isDefault);
       if (defView) setActiveCustomView(defView);
-      const draftVal = dft?.configs?.CANDIDATE_DRAFT || dft?.value;
-      if (draftVal && typeof draftVal === 'object') {
-        if (draftVal.firstName || draftVal.email) {
-          setCandidateForm((prev) => ({ ...prev, ...draftVal }));
-        }
-        if (Array.isArray(draftVal.educationRows) && draftVal.educationRows.length > 0) {
-          setEducationRows(draftVal.educationRows);
-        }
-        if (Array.isArray(draftVal.experienceRows) && draftVal.experienceRows.length > 0) {
-          setExperienceRows(draftVal.experienceRows);
-        }
-        if (Array.isArray(draftVal.dependentRows) && draftVal.dependentRows.length > 0) {
-          setDependentRows(draftVal.dependentRows);
-        }
+
+      const serverDraft = dft?.configs?.CANDIDATE_DRAFT || dft?.value;
+      const localDraft = readLocalCandidateDraft();
+      const serverHasContent =
+        serverDraft &&
+        typeof serverDraft === 'object' &&
+        hasCandidateDraftContent(
+          serverDraft,
+          serverDraft.educationRows,
+          serverDraft.experienceRows,
+          serverDraft.dependentRows,
+        );
+      const localHasContent =
+        localDraft &&
+        typeof localDraft === 'object' &&
+        hasCandidateDraftContent(
+          localDraft,
+          localDraft.educationRows,
+          localDraft.experienceRows,
+          localDraft.dependentRows,
+        );
+
+      let chosenDraft = null;
+      if (serverHasContent && localHasContent) {
+        const localTs = Date.parse(localDraft.updatedAt || '') || 0;
+        const serverTs = Date.parse(serverDraft.updatedAt || '') || 0;
+        chosenDraft = localTs >= serverTs ? localDraft : serverDraft;
+      } else if (localHasContent) {
+        chosenDraft = localDraft;
+      } else if (serverHasContent) {
+        chosenDraft = serverDraft;
       }
-      setCandidateForm((prev) => ({
-        ...prev,
-        departmentId: prev.departmentId || deptList[0]?.id || '',
-        department: prev.department || deptList[0]?.name || 'IT',
-        positionId: prev.positionId || posList[0]?.id || '',
-        gradeId: prev.gradeId || grdList[0]?.id || '',
-        locationId: prev.locationId || locList[0]?.id || '',
-        employmentCategoryCode: prev.employmentCategoryCode || catList.find((c) => c.status === 'ACTIVE')?.code || catList[0]?.code || 'PERMANENT',
-      }));
+
+      if (chosenDraft) {
+        const {
+          educationRows: savedEdu,
+          experienceRows: savedExp,
+          dependentRows: savedDep,
+          updatedAt: savedUpdatedAt,
+          ...formFields
+        } = chosenDraft;
+        setCandidateForm((prev) => ({
+          ...prev,
+          ...formFields,
+          departmentId: formFields.departmentId || prev.departmentId || deptList[0]?.id || '',
+          department: formFields.department || prev.department || deptList[0]?.name || 'IT',
+          positionId: formFields.positionId || prev.positionId || posList[0]?.id || '',
+          gradeId: formFields.gradeId || prev.gradeId || grdList[0]?.id || '',
+          locationId: formFields.locationId || prev.locationId || locList[0]?.id || '',
+          employmentCategoryCode:
+            formFields.employmentCategoryCode ||
+            prev.employmentCategoryCode ||
+            catList.find((c) => c.status === 'ACTIVE')?.code ||
+            catList[0]?.code ||
+            'PERMANENT',
+        }));
+        if (Array.isArray(savedEdu) && savedEdu.length > 0) setEducationRows(savedEdu);
+        if (Array.isArray(savedExp) && savedExp.length > 0) setExperienceRows(savedExp);
+        if (Array.isArray(savedDep) && savedDep.length > 0) setDependentRows(savedDep);
+        if (savedUpdatedAt) setDraftSavedAt(savedUpdatedAt);
+      } else {
+        setCandidateForm((prev) => ({
+          ...prev,
+          departmentId: prev.departmentId || deptList[0]?.id || '',
+          department: prev.department || deptList[0]?.name || 'IT',
+          positionId: prev.positionId || posList[0]?.id || '',
+          gradeId: prev.gradeId || grdList[0]?.id || '',
+          locationId: prev.locationId || locList[0]?.id || '',
+          employmentCategoryCode:
+            prev.employmentCategoryCode ||
+            catList.find((c) => c.status === 'ACTIVE')?.code ||
+            catList[0]?.code ||
+            'PERMANENT',
+        }));
+      }
       setReqForm((prev) => ({ ...prev, departmentId: prev.departmentId || deptList[0]?.id || '' }));
       setTransferForm((prev) => ({
         ...prev,
@@ -379,8 +597,17 @@ export default function WorkforceDirectoryView({
       setSepForm((prev) => ({ ...prev, employeeId: prev.employeeId || employees[0]?.id || '' }));
     } catch {
       // ignore catalog load failure on restricted role
+    } finally {
+      draftHydratedRef.current = true;
     }
   };
+
+  useEffect(() => {
+    if (!draftHydratedRef.current) return;
+    if (hasCandidateDraftContent(candidateForm, educationRows, experienceRows, dependentRows)) {
+      writeLocalCandidateDraft(buildDraftPayload());
+    }
+  }, [candidateForm, educationRows, experienceRows, dependentRows]);
 
   const loadOperationsTabData = async (mode) => {
     if (mode === 'ict') {
@@ -533,101 +760,310 @@ export default function WorkforceDirectoryView({
 
   const handleCandidateSubmit = async (e, keepOpen = false) => {
     if (e && e.preventDefault) e.preventDefault();
-    if (!candidateForm.firstName || !candidateForm.lastName || !candidateForm.email) {
-      notify('First name, Last name, and Email ID are required.', 'error');
+    if (candidateSubmitting) return;
+
+    const firstName = (candidateForm.firstName || '').trim();
+    const lastName = (candidateForm.lastName || '').trim();
+    const email = (candidateForm.email || '').trim();
+    const officialEmail = (candidateForm.officialEmail || '').trim();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (firstName.length < 2) {
+      notify('First name must be at least 2 characters.', 'error');
+      return;
+    }
+    if (lastName.length < 2) {
+      notify('Last name must be at least 2 characters.', 'error');
+      return;
+    }
+    if (!emailRegex.test(email)) {
+      notify('Please enter a valid Email ID.', 'error');
+      return;
+    }
+    if (officialEmail && !emailRegex.test(officialEmail)) {
+      notify('Please enter a valid Official Email or leave it blank.', 'error');
       return;
     }
 
-    const chosenDeptId =
-      candidateForm.departmentId ||
-      departments.find((d) => d.name === candidateForm.department)?.id ||
-      departments[0]?.id;
+    const workEmail = officialEmail || email;
+    const rawPhone = `${candidateForm.phoneCode || '+254'}${candidateForm.phone || ''}`.replace(/\s+/g, '');
+    const normalizedPhone = rawPhone.length >= 8 ? rawPhone.slice(0, 20) : '+254700000000';
+    const startDate = /^\d{4}-\d{2}-\d{2}$/.test(candidateForm.hireDate || '')
+      ? candidateForm.hireDate
+      : new Date().toISOString().slice(0, 10);
 
-    if (!chosenDeptId) {
-      notify('Department catalog not loaded or selected.', 'error');
-      return;
-    }
+    setCandidateSubmitting(true);
+    try {
+      let deptCatalog = departments;
+      if (deptCatalog.length === 0) {
+        const fetchedDepts = await apiGet('/api/v1/departments').catch(() => []);
+        deptCatalog = unwrapList(fetchedDepts);
+        if (deptCatalog.length > 0) setDepartments(deptCatalog);
+      }
+      let catCatalog = categories;
+      if (catCatalog.length === 0) {
+        const fetchedCats = await apiGet('/api/v1/employee-categories').catch(() => []);
+        catCatalog = unwrapList(fetchedCats);
+        if (catCatalog.length > 0) setCategories(catCatalog);
+      }
 
-    const workEmail = candidateForm.officialEmail || candidateForm.email;
-    const rawPhone = `${candidateForm.phoneCode || '+254'}${candidateForm.phone || '712000000'}`.replace(/\s+/g, '');
+      const chosenDeptId =
+        candidateForm.departmentId ||
+        deptCatalog.find((d) => d.name === candidateForm.department)?.id ||
+        deptCatalog[0]?.id;
 
-    const trimmedJobTitle = candidateForm.jobTitle ? candidateForm.jobTitle.trim() : '';
-    const trimmedNationalId = candidateForm.nationalId ? candidateForm.nationalId.trim() : '';
-    const trimmedKraPin = candidateForm.kraPin ? candidateForm.kraPin.trim() : '';
-    const trimmedNssf = candidateForm.nssfNumber ? candidateForm.nssfNumber.trim() : '';
-    const trimmedShif = candidateForm.shifNumber ? candidateForm.shifNumber.trim() : '';
+      if (!chosenDeptId) {
+        notify('Department catalog not loaded or selected.', 'error');
+        return;
+      }
 
-    if (onCreateEmployee) {
-      const createdOk = await onCreateEmployee({
-        firstName: candidateForm.firstName.trim(),
-        lastName: candidateForm.lastName.trim(),
-        personalEmail: candidateForm.email.trim(),
-        workEmail: workEmail.trim(),
-        phoneNumber: rawPhone.length >= 8 ? rawPhone : '+254712000000',
-        gender: candidateForm.gender || 'Male',
-        dateOfBirth: candidateForm.dateOfBirth || undefined,
-        nationalId: trimmedNationalId || undefined,
-        kraPin: trimmedKraPin || undefined,
-        nssfNumber: trimmedNssf || undefined,
-        shifNumber: trimmedShif || undefined,
-        employmentCategoryCode: candidateForm.employmentCategoryCode || categories.find((c) => c.status === 'ACTIVE')?.code || 'PERMANENT',
-        startDate: candidateForm.hireDate || '2026-11-13',
-        jobTitle: trimmedJobTitle.length >= 2 ? trimmedJobTitle : 'Associate',
-        departmentId: chosenDeptId,
-        ...(candidateForm.positionId ? { positionId: candidateForm.positionId } : {}),
-        ...(candidateForm.gradeId ? { gradeId: candidateForm.gradeId } : {}),
-        ...(candidateForm.locationId ? { locationId: candidateForm.locationId } : {}),
-      });
-      if (createdOk === false) return;
-    }
-    if (photoPreview?.base64) {
-      await apiPost('/api/v1/documents/upload', {
-        fileName: photoPreview.name || 'profile-photo.png',
-        mimeType: photoPreview.mimeType || 'image/png',
-        category: 'ORGANISATION',
-        securityClassification: 'INTERNAL',
-        fileBase64: photoPreview.base64,
+      const trimmedJobTitle = candidateForm.jobTitle ? candidateForm.jobTitle.trim() : '';
+      const trimmedNationalId = candidateForm.nationalId ? candidateForm.nationalId.trim() : '';
+      const trimmedKraPin = candidateForm.kraPin ? candidateForm.kraPin.trim() : '';
+      const trimmedNssf = candidateForm.nssfNumber ? candidateForm.nssfNumber.trim() : '';
+      const trimmedShif = candidateForm.shifNumber ? candidateForm.shifNumber.trim() : '';
+
+      if (onCreateEmployee) {
+        const createdOk = await onCreateEmployee({
+          firstName,
+          lastName,
+          personalEmail: email,
+          workEmail,
+          phoneNumber: normalizedPhone,
+          gender: candidateForm.gender || 'Male',
+          dateOfBirth: /^\d{4}-\d{2}-\d{2}$/.test(candidateForm.dateOfBirth || '')
+            ? candidateForm.dateOfBirth
+            : undefined,
+          nationalId: trimmedNationalId.length >= 4 ? trimmedNationalId : undefined,
+          kraPin: trimmedKraPin.length >= 5 ? trimmedKraPin : undefined,
+          nssfNumber: trimmedNssf || undefined,
+          shifNumber: trimmedShif || undefined,
+          employmentCategoryCode:
+            candidateForm.employmentCategoryCode ||
+            catCatalog.find((c) => c.status === 'ACTIVE')?.code ||
+            catCatalog[0]?.code ||
+            'PERMANENT',
+          startDate,
+          jobTitle: trimmedJobTitle.length >= 2 ? trimmedJobTitle : 'Associate',
+          departmentId: chosenDeptId,
+          ...(candidateForm.positionId ? { positionId: candidateForm.positionId } : {}),
+          ...(candidateForm.gradeId ? { gradeId: candidateForm.gradeId } : {}),
+          ...(candidateForm.locationId ? { locationId: candidateForm.locationId } : {}),
+        });
+        if (createdOk === false) return;
+      }
+
+      if (photoPreview?.base64) {
+        await apiPost('/api/v1/documents/upload', {
+          fileName: photoPreview.name || 'profile-photo.png',
+          mimeType: photoPreview.mimeType || 'image/png',
+          category: 'ORGANISATION',
+          securityClassification: 'INTERNAL',
+          fileBase64: photoPreview.base64,
+        }).catch(() => null);
+      }
+
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.setItem(
+            `ndakala_employee_extended_${workEmail.toLowerCase()}`,
+            JSON.stringify({
+              addressLine1: candidateForm.addressLine1,
+              addressLine2: candidateForm.addressLine2,
+              city: candidateForm.city,
+              sameAsPresent: candidateForm.sameAsPresent,
+              educationRows,
+              experienceRows,
+              dependentRows,
+            }),
+          );
+        }
+      } catch {
+        // ignore storage quota errors
+      }
+
+      writeLocalCandidateDraft(null);
+      await apiRequest('/api/v1/workspace/ui-config', {
+        method: 'PUT',
+        body: { key: 'CANDIDATE_DRAFT', scope: 'USER', value: {} },
       }).catch(() => null);
-    }
-    await apiRequest('/api/v1/workspace/ui-config', {
-      method: 'PUT',
-      body: { key: 'CANDIDATE_DRAFT', scope: 'USER', value: {} },
-    }).catch(() => null);
 
-    if (!keepOpen) {
-      setAddCandidateOpen(false);
-    } else {
-      setCandidateForm({
-        ...candidateForm,
-        email: '',
-        firstName: '',
-        lastName: '',
-        phone: '',
-        officialEmail: '',
-      });
+      if (!keepOpen) {
+        resetCandidateFormState(deptCatalog, positions, grades, locations, catCatalog);
+        setAddCandidateOpen(false);
+      } else {
+        setCandidateForm({
+          ...createDefaultCandidateForm(),
+          departmentId: chosenDeptId,
+          department: candidateForm.department,
+          positionId: candidateForm.positionId,
+          gradeId: candidateForm.gradeId,
+          locationId: candidateForm.locationId,
+          employmentCategoryCode: candidateForm.employmentCategoryCode,
+        });
+        setEducationRows([createEmptyEducationRow()]);
+        setExperienceRows([createEmptyExperienceRow()]);
+        setDependentRows([createEmptyDependentRow()]);
+        setPhotoPreview(null);
+        setDraftSavedAt(null);
+      }
+    } finally {
+      setCandidateSubmitting(false);
     }
   };
 
-  const handleSaveCandidateDraft = async () => {
+  const handleSaveCandidateDraft = async (closeAfterSave = false) => {
+    if (draftSaving) return;
+    const payload = buildDraftPayload();
+    writeLocalCandidateDraft(payload);
+    setDraftSaving(true);
     try {
       await apiRequest('/api/v1/workspace/ui-config', {
         method: 'PUT',
         body: {
           key: 'CANDIDATE_DRAFT',
           scope: 'USER',
-          value: {
-            ...candidateForm,
-            educationRows,
-            experienceRows,
-            dependentRows,
-          },
+          value: payload,
         },
       });
-      notify('Candidate draft saved to workspace storage.');
-      setAddCandidateOpen(false);
+      setDraftSavedAt(payload.updatedAt);
+      notify(closeAfterSave ? 'Draft saved.' : 'Draft saved to workspace storage.');
+      if (closeAfterSave) {
+        setAddCandidateOpen(false);
+      }
     } catch (err) {
-      notify(err?.message || 'Unable to save candidate draft', 'error');
+      setDraftSavedAt(payload.updatedAt);
+      notify(
+        err?.status === 401
+          ? 'Draft saved locally. Please sign in again to sync to your workspace.'
+          : `${err?.message || 'Workspace sync failed'} (draft preserved locally).`,
+        'error',
+      );
+    } finally {
+      setDraftSaving(false);
     }
+  };
+
+  const handleClearCandidateDraft = async () => {
+    writeLocalCandidateDraft(null);
+    resetCandidateFormState();
+    try {
+      await apiRequest('/api/v1/workspace/ui-config', {
+        method: 'PUT',
+        body: { key: 'CANDIDATE_DRAFT', scope: 'USER', value: {} },
+      });
+    } catch {
+      // local state and localStorage are already cleared
+    }
+    notify('Candidate draft cleared.');
+  };
+
+  const handleCsvImportFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      if (lines.length < 2) {
+        notify('CSV file must include a header row and at least one employee row.', 'error');
+        return;
+      }
+      const headers = parseCsvRow(lines[0]).map((h) => h.toLowerCase());
+      const findCol = (aliases) => headers.findIndex((h) => aliases.includes(h));
+      const firstIdx = findCol(['first name', 'firstname', 'first_name']);
+      const lastIdx = findCol(['last name', 'lastname', 'last_name']);
+      const emailIdx = findCol(['email id', 'email', 'personal email', 'workemail', 'work_email']);
+      const offEmailIdx = findCol(['official email', 'official_email', 'work email']);
+      const deptIdx = findCol(['department', 'dept']);
+      const titleIdx = findCol(['title', 'job title', 'jobtitle', 'job_title']);
+      const phoneIdx = findCol(['phone', 'phonenumber', 'phone_number']);
+
+      let deptCatalog = departments;
+      if (deptCatalog.length === 0) {
+        deptCatalog = unwrapList(await apiGet('/api/v1/departments').catch(() => []));
+        if (deptCatalog.length > 0) setDepartments(deptCatalog);
+      }
+      const defaultDeptId = deptCatalog[0]?.id;
+      if (!defaultDeptId) {
+        notify('Department catalog not loaded. Cannot import employees.', 'error');
+        return;
+      }
+
+      let imported = 0;
+      let failed = 0;
+      for (const rawLine of lines.slice(1)) {
+        const cols = parseCsvRow(rawLine);
+        const firstName = (cols[firstIdx] || '').trim();
+        const lastName = (cols[lastIdx] || '').trim();
+        const email = (cols[emailIdx] || cols[offEmailIdx] || '').trim();
+        const workEmail = (cols[offEmailIdx] || email).trim();
+        if (firstName.length < 2 || lastName.length < 2 || !workEmail.includes('@')) {
+          failed += 1;
+          continue;
+        }
+        const deptName = deptIdx >= 0 ? (cols[deptIdx] || '').trim().toLowerCase() : '';
+        const matchedDept = deptCatalog.find((d) => d.name.toLowerCase() === deptName || d.code?.toLowerCase() === deptName);
+        const rawPhone = (phoneIdx >= 0 ? cols[phoneIdx] || '' : '').replace(/\s+/g, '');
+        const ok = onCreateEmployee
+          ? await onCreateEmployee({
+              firstName,
+              lastName,
+              personalEmail: email || workEmail,
+              workEmail,
+              phoneNumber: rawPhone.length >= 8 ? rawPhone.slice(0, 20) : '+254700000000',
+              jobTitle: (titleIdx >= 0 && cols[titleIdx]?.trim().length >= 2) ? cols[titleIdx].trim() : 'Associate',
+              departmentId: matchedDept?.id || defaultDeptId,
+              employmentCategoryCode:
+                categories.find((c) => c.status === 'ACTIVE')?.code || 'PERMANENT',
+              startDate: new Date().toISOString().slice(0, 10),
+            })
+          : false;
+        if (ok) imported += 1;
+        else failed += 1;
+      }
+      notify(
+        failed > 0
+          ? `CSV import complete: ${imported} created, ${failed} skipped.`
+          : `Successfully imported ${imported} employee record(s).`,
+        imported > 0 ? 'success' : 'error',
+      );
+    } catch (err) {
+      notify(err?.message || 'Unable to parse CSV import file.', 'error');
+    }
+  };
+
+  const handleBulkFilesUpload = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (files.length === 0) return;
+    let uploaded = 0;
+    let failed = 0;
+    for (const file of files) {
+      if (file.size > 5 * 1024 * 1024) {
+        failed += 1;
+        continue;
+      }
+      try {
+        const fileBase64 = await readFileAsBase64(file);
+        await apiPost('/api/v1/documents/upload', {
+          fileName: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          category: 'ORGANISATION',
+          securityClassification: 'INTERNAL',
+          fileBase64,
+        });
+        uploaded += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    notify(
+      failed > 0
+        ? `Bulk upload: ${uploaded} file(s) uploaded, ${failed} failed (max 5 MB each).`
+        : `Uploaded ${uploaded} document(s) to the Ndakala Document Vault.`,
+      uploaded > 0 ? 'success' : 'error',
+    );
   };
 
   const handleSaveCustomView = async () => {
@@ -878,6 +1314,20 @@ export default function WorkforceDirectoryView({
 
           {/* ... More Menu (Import / Export / History Export / Bulk File Upload) */}
           <div className="relative" ref={moreRef}>
+            <input
+              ref={csvImportInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={handleCsvImportFile}
+            />
+            <input
+              ref={bulkUploadInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={handleBulkFilesUpload}
+            />
             <button
               type="button"
               onClick={() => setMoreActionsOpen(!moreActionsOpen)}
@@ -892,7 +1342,7 @@ export default function WorkforceDirectoryView({
                   type="button"
                   onClick={() => {
                     setMoreActionsOpen(false);
-                    setAddCandidateOpen(true);
+                    csvImportInputRef.current?.click();
                   }}
                   className="w-full px-3.5 py-2 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2.5"
                 >
@@ -919,7 +1369,7 @@ export default function WorkforceDirectoryView({
                   type="button"
                   onClick={() => {
                     setMoreActionsOpen(false);
-                    setAddCandidateOpen(true);
+                    bulkUploadInputRef.current?.click();
                   }}
                   className="w-full px-3.5 py-2 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2.5"
                 >
@@ -1902,15 +2352,29 @@ export default function WorkforceDirectoryView({
         </div>
       )}
 
-      {/* ==================== FULL-SCREEN "ADD CANDIDATE" MODAL ==================== */}
+      {/* ==================== FULL-SCREEN "ADD CANDIDATE / EMPLOYEE" MODAL ==================== */}
       {addCandidateOpen && (
         <div className="fixed inset-0 z-50 bg-[#edf1f7] flex flex-col animate-fadeIn">
           {/* Top Header */}
           <div className="bg-white px-6 py-3.5 border-b border-slate-200 flex items-center justify-between flex-shrink-0">
-            <h2 className="text-sm font-semibold text-slate-800">Add Candidate</h2>
+            <div className="flex items-center gap-2.5">
+              <h2 className="text-sm font-semibold text-slate-800">
+                {topContextTab === 'employees' ? 'Add Employee' : 'Add Candidate'}
+              </h2>
+              {draftSavedAt && (
+                <span className="px-2 py-0.5 text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full">
+                  Draft saved{' '}
+                  {new Date(draftSavedAt).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </span>
+              )}
+            </div>
             <button
               type="button"
               onClick={() => setAddCandidateOpen(false)}
+              title="Close"
               className="text-slate-400 hover:text-slate-700 p-1"
             >
               <X size={18} />
@@ -1919,6 +2383,7 @@ export default function WorkforceDirectoryView({
 
           {/* Scrollable Form Cards */}
           <form
+            noValidate
             onSubmit={(e) => handleCandidateSubmit(e, false)}
             className="flex-1 flex flex-col overflow-hidden"
           >
@@ -2158,10 +2623,7 @@ export default function WorkforceDirectoryView({
                   <button
                     type="button"
                     onClick={() =>
-                      setEducationRows([
-                        ...educationRows,
-                        { school: '', degree: '', field: '', completionDate: '', notes: '' },
-                      ])
+                      setEducationRows([...educationRows, createEmptyEducationRow()])
                     }
                     className="px-3 py-1 bg-blue-50 text-[#0088ff] font-medium rounded hover:bg-blue-100"
                   >
@@ -2176,6 +2638,7 @@ export default function WorkforceDirectoryView({
                       <th className="py-2 px-3">Field(s) of Study</th>
                       <th className="py-2 px-3">Date of Completion</th>
                       <th className="py-2 px-3">Additional Notes</th>
+                      <th className="py-2 px-3 w-12 text-center">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2184,10 +2647,10 @@ export default function WorkforceDirectoryView({
                         <td className="p-2">
                           <input
                             type="text"
-                            value={row.school}
+                            value={row.school || ''}
                             onChange={(e) => {
                               const next = [...educationRows];
-                              next[idx].school = e.target.value;
+                              next[idx] = { ...next[idx], school: e.target.value };
                               setEducationRows(next);
                             }}
                             className="w-full px-2.5 py-1.5 border border-slate-200 rounded"
@@ -2196,10 +2659,10 @@ export default function WorkforceDirectoryView({
                         <td className="p-2">
                           <input
                             type="text"
-                            value={row.degree}
+                            value={row.degree || ''}
                             onChange={(e) => {
                               const next = [...educationRows];
-                              next[idx].degree = e.target.value;
+                              next[idx] = { ...next[idx], degree: e.target.value };
                               setEducationRows(next);
                             }}
                             className="w-full px-2.5 py-1.5 border border-slate-200 rounded"
@@ -2208,10 +2671,22 @@ export default function WorkforceDirectoryView({
                         <td className="p-2">
                           <input
                             type="text"
-                            value={row.field}
+                            value={row.field || ''}
                             onChange={(e) => {
                               const next = [...educationRows];
-                              next[idx].field = e.target.value;
+                              next[idx] = { ...next[idx], field: e.target.value };
+                              setEducationRows(next);
+                            }}
+                            className="w-full px-2.5 py-1.5 border border-slate-200 rounded"
+                          />
+                        </td>
+                        <td className="p-2">
+                          <input
+                            type="date"
+                            value={row.completionDate || ''}
+                            onChange={(e) => {
+                              const next = [...educationRows];
+                              next[idx] = { ...next[idx], completionDate: e.target.value };
                               setEducationRows(next);
                             }}
                             className="w-full px-2.5 py-1.5 border border-slate-200 rounded"
@@ -2220,27 +2695,27 @@ export default function WorkforceDirectoryView({
                         <td className="p-2">
                           <input
                             type="text"
-                            placeholder="dd-MMM-yyyy"
-                            value={row.completionDate}
+                            value={row.notes || ''}
                             onChange={(e) => {
                               const next = [...educationRows];
-                              next[idx].completionDate = e.target.value;
+                              next[idx] = { ...next[idx], notes: e.target.value };
                               setEducationRows(next);
                             }}
                             className="w-full px-2.5 py-1.5 border border-slate-200 rounded"
                           />
                         </td>
-                        <td className="p-2">
-                          <input
-                            type="text"
-                            value={row.notes}
-                            onChange={(e) => {
-                              const next = [...educationRows];
-                              next[idx].notes = e.target.value;
-                              setEducationRows(next);
-                            }}
-                            className="w-full px-2.5 py-1.5 border border-slate-200 rounded"
-                          />
+                        <td className="p-2 text-center">
+                          <button
+                            type="button"
+                            title="Remove Row"
+                            aria-label="Remove Row"
+                            onClick={() =>
+                              removeTableRow(setEducationRows, idx, createEmptyEducationRow)
+                            }
+                            className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
+                          >
+                            <X size={14} />
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -2255,18 +2730,7 @@ export default function WorkforceDirectoryView({
                   <button
                     type="button"
                     onClick={() =>
-                      setExperienceRows([
-                        ...experienceRows,
-                        {
-                          occupation: '',
-                          company: '',
-                          summary: '',
-                          duration: '',
-                          currentlyWorkHere: 'Select',
-                          fromDate: '',
-                          toDate: '',
-                        },
-                      ])
+                      setExperienceRows([...experienceRows, createEmptyExperienceRow()])
                     }
                     className="px-3 py-1 bg-blue-50 text-[#0088ff] font-medium rounded hover:bg-blue-100"
                   >
@@ -2282,6 +2746,7 @@ export default function WorkforceDirectoryView({
                       <th className="py-2 px-3">Duration</th>
                       <th className="py-2 px-3">From Date</th>
                       <th className="py-2 px-3">To Date</th>
+                      <th className="py-2 px-3 w-12 text-center">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2359,6 +2824,19 @@ export default function WorkforceDirectoryView({
                             className="w-full px-2.5 py-1.5 border border-slate-200 rounded"
                           />
                         </td>
+                        <td className="p-2 text-center">
+                          <button
+                            type="button"
+                            title="Remove Row"
+                            aria-label="Remove Row"
+                            onClick={() =>
+                              removeTableRow(setExperienceRows, idx, createEmptyExperienceRow)
+                            }
+                            className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
+                          >
+                            <X size={14} />
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -2374,10 +2852,7 @@ export default function WorkforceDirectoryView({
                   <button
                     type="button"
                     onClick={() =>
-                      setDependentRows([
-                        ...dependentRows,
-                        { name: '', relationship: 'Select', dob: '' },
-                      ])
+                      setDependentRows([...dependentRows, createEmptyDependentRow()])
                     }
                     className="px-3 py-1 bg-blue-50 text-[#0088ff] font-medium rounded hover:bg-blue-100"
                   >
@@ -2390,6 +2865,7 @@ export default function WorkforceDirectoryView({
                       <th className="py-2 px-3">Name</th>
                       <th className="py-2 px-3">Relationship</th>
                       <th className="py-2 px-3">Date of birth</th>
+                      <th className="py-2 px-3 w-12 text-center">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2434,6 +2910,19 @@ export default function WorkforceDirectoryView({
                             }}
                             className="w-full px-2.5 py-1.5 border border-slate-200 rounded"
                           />
+                        </td>
+                        <td className="p-2 text-center">
+                          <button
+                            type="button"
+                            title="Remove Row"
+                            aria-label="Remove Row"
+                            onClick={() =>
+                              removeTableRow(setDependentRows, idx, createEmptyDependentRow)
+                            }
+                            className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
+                          >
+                            <X size={14} />
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -2589,35 +3078,65 @@ export default function WorkforceDirectoryView({
               </div>
             </div>
 
-            {/* Sticky Bottom Bar: Submit | Submit and New | Save Draft | Cancel (07:59 of hr.webm) */}
-            <div className="bg-white px-6 py-3 border-t border-slate-200 flex items-center gap-2.5 flex-shrink-0">
-              <button
-                type="submit"
-                className="px-4 py-1.5 bg-[#0088ff] hover:bg-[#0073d9] text-white text-xs font-medium rounded shadow-2xs"
-              >
-                Submit
-              </button>
-              <button
-                type="button"
-                onClick={(e) => handleCandidateSubmit(e, true)}
-                className="px-4 py-1.5 bg-[#0088ff] hover:bg-[#0073d9] text-white text-xs font-medium rounded shadow-2xs"
-              >
-                Submit and New
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveCandidateDraft}
-                className="px-4 py-1.5 border border-slate-300 text-slate-700 text-xs font-medium rounded hover:bg-slate-50"
-              >
-                Save Draft
-              </button>
-              <button
-                type="button"
-                onClick={() => setAddCandidateOpen(false)}
-                className="px-4 py-1.5 border border-slate-300 text-slate-700 text-xs font-medium rounded hover:bg-slate-50"
-              >
-                Cancel
-              </button>
+            {/* Sticky Bottom Bar: Submit | Submit and New | Save Draft | Save & Close | Clear Draft | Cancel */}
+            <div className="bg-white px-6 py-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2.5 flex-shrink-0">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="submit"
+                  disabled={candidateSubmitting || draftSaving}
+                  className="px-4 py-1.5 bg-[#0088ff] hover:bg-[#0073d9] disabled:opacity-60 text-white text-xs font-medium rounded shadow-2xs"
+                >
+                  {candidateSubmitting ? 'Submitting...' : 'Submit'}
+                </button>
+                <button
+                  type="button"
+                  disabled={candidateSubmitting || draftSaving}
+                  onClick={(e) => handleCandidateSubmit(e, true)}
+                  className="px-4 py-1.5 bg-[#0088ff] hover:bg-[#0073d9] disabled:opacity-60 text-white text-xs font-medium rounded shadow-2xs"
+                >
+                  Submit and New
+                </button>
+                <button
+                  type="button"
+                  disabled={draftSaving || candidateSubmitting}
+                  onClick={() => handleSaveCandidateDraft(false)}
+                  className="px-4 py-1.5 border border-slate-300 text-slate-700 text-xs font-medium rounded hover:bg-slate-50 disabled:opacity-60"
+                >
+                  {draftSaving ? 'Saving...' : 'Save Draft'}
+                </button>
+                <button
+                  type="button"
+                  disabled={draftSaving || candidateSubmitting}
+                  onClick={() => handleSaveCandidateDraft(true)}
+                  className="px-4 py-1.5 border border-slate-300 text-slate-700 text-xs font-medium rounded hover:bg-slate-50 disabled:opacity-60"
+                >
+                  Save &amp; Close
+                </button>
+                <button
+                  type="button"
+                  disabled={draftSaving || candidateSubmitting}
+                  onClick={handleClearCandidateDraft}
+                  className="px-4 py-1.5 border border-rose-200 text-rose-600 text-xs font-medium rounded hover:bg-rose-50 disabled:opacity-60"
+                >
+                  Clear Draft
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAddCandidateOpen(false)}
+                  className="px-4 py-1.5 border border-slate-300 text-slate-700 text-xs font-medium rounded hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+              </div>
+              {draftSavedAt && (
+                <span className="text-[11px] text-emerald-700 font-medium">
+                  Draft synced at{' '}
+                  {new Date(draftSavedAt).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </span>
+              )}
             </div>
           </form>
         </div>
