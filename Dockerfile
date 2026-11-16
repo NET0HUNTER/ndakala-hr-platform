@@ -16,6 +16,7 @@ COPY src ./src
 COPY tests ./tests
 COPY frontend ./frontend
 COPY public ./public
+COPY assets ./assets
 
 # Generate Prisma Client, compile TypeScript & bundle Frontend SPA
 RUN npx prisma generate && npm run build && npm run build:frontend
@@ -35,6 +36,7 @@ COPY prisma ./prisma
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/assets ./assets
 COPY secure_storage ./secure_storage
 
 RUN sed -i 's/\r$//' ./docker-entrypoint.sh && chmod +x ./docker-entrypoint.sh && ./node_modules/.bin/prisma generate --schema=prisma/schema.postgresql.prisma

@@ -68,6 +68,22 @@ export default function OrgAdminEnterprisePanels({
     outboundUrl: 'https://lms.ndakala.co.ke/hooks',
   });
 
+  // Microsoft 365 App-Only Config & Cold Storage Archive Settings
+  const [m365Form, setM365Form] = useState({
+    status: 'ACTIVE',
+    tenantId: '',
+    clientId: '',
+    clientSecret: '',
+    sharepointSiteUrl: 'https://ndakalaadvisory.sharepoint.com/sites/NdakalaPeopleHR',
+    senderMailbox: 'noreply@ndakalaadvisory.co.ke',
+    appBaseUrl: 'https://ndakalahr.duckdns.org',
+    hasClientSecret: false,
+  });
+  const [m365TestMailbox, setM365TestMailbox] = useState('audit@ndakalaadvisory.co.ke');
+  const [m365TestResult, setM365TestResult] = useState(null);
+  const [coldArchiveCfg, setColdArchiveCfg] = useState({ coldArchiveEnabled: false, coldArchiveMonths: 6 });
+  const [coldArchiveReport, setColdArchiveReport] = useState(null);
+
   // Privacy DPA 2019
   const [dpias, setDpias] = useState([]);
   const [dsrs, setDsrs] = useState([]);
@@ -105,11 +121,13 @@ export default function OrgAdminEnterprisePanels({
         const c = await apiGet('/api/v1/configuration');
         setPolicies(unwrapList(c));
       } else if (orgTab === 'integrations') {
-        const [p, cfg, logs, runs] = await Promise.all([
+        const [p, cfg, logs, runs, m365Cfg, orgRec] = await Promise.all([
           apiGet('/api/v1/integrations/profiles').catch(() => []),
           apiGet('/api/v1/integrations/configs').catch(() => []),
           apiGet('/api/v1/integrations/logs').catch(() => []),
           apiGet('/api/v1/payroll/runs').catch(() => []),
+          apiGet('/api/v1/integrations/configs/MICROSOFT_365').catch(() => null),
+          apiGet('/api/v1/organisation').catch(() => null),
         ]);
         setProfiles(unwrapList(p));
         setConfigs(unwrapList(cfg));
@@ -118,6 +136,25 @@ export default function OrgAdminEnterprisePanels({
         setPayrollRuns(runItems);
         if (runItems[0] && !eftForm.payrollRunId) {
           setEftForm((prev) => ({ ...prev, payrollRunId: runItems[0].id }));
+        }
+        if (m365Cfg?.settingsSummary) {
+          setM365Form((prev) => ({
+            ...prev,
+            status: m365Cfg.status || 'DISABLED',
+            tenantId: m365Cfg.settingsSummary.tenantId || '',
+            clientId: m365Cfg.settingsSummary.clientId || '',
+            sharepointSiteUrl: m365Cfg.settingsSummary.sharepointSiteUrl || prev.sharepointSiteUrl,
+            senderMailbox: m365Cfg.settingsSummary.senderMailbox || 'noreply@ndakalaadvisory.co.ke',
+            appBaseUrl: m365Cfg.settingsSummary.appBaseUrl || 'https://ndakalahr.duckdns.org',
+            hasClientSecret: Boolean(m365Cfg.settingsSummary.hasClientSecret),
+            clientSecret: '',
+          }));
+        }
+        if (orgRec) {
+          setColdArchiveCfg({
+            coldArchiveEnabled: Boolean(orgRec.coldArchiveEnabled),
+            coldArchiveMonths: Number(orgRec.coldArchiveMonths) || 6,
+          });
         }
       } else if (orgTab === 'privacy') {
         const [dp, ds, lh] = await Promise.all([
@@ -620,8 +657,243 @@ export default function OrgAdminEnterprisePanels({
       }
     };
 
+    const handleSaveM365 = async (e) => {
+      e.preventDefault();
+      try {
+        await apiPut('/api/v1/integrations/configs/MICROSOFT_365', {
+          status: m365Form.status,
+          isEnabled: m365Form.status !== 'DISABLED',
+          outboundUrl: m365Form.sharepointSiteUrl || undefined,
+          configPayload: {
+            tenantId: m365Form.tenantId.trim(),
+            clientId: m365Form.clientId.trim(),
+            ...(m365Form.clientSecret.trim() ? { clientSecret: m365Form.clientSecret.trim() } : {}),
+            sharepointSiteUrl: m365Form.sharepointSiteUrl.trim(),
+            senderMailbox: m365Form.senderMailbox.trim(),
+            appBaseUrl: m365Form.appBaseUrl.trim(),
+          },
+        });
+        toast('Microsoft 365 App-Only credentials encrypted & saved.');
+        loadPanelData();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+
+    const handleTestM365Connection = async () => {
+      try {
+        const res = await apiPost('/api/v1/integrations/m365/test-connection', {});
+        setM365TestResult(res);
+        toast(res.connected ? 'Microsoft Graph App-Only connection verified!' : res.message || 'Not connected', res.connected ? 'success' : 'warning');
+      } catch (err) {
+        setM365TestResult({ connected: false, error: err.message });
+        toast(err.message, 'error');
+      }
+    };
+
+    const handleSendTestM365Mail = async () => {
+      try {
+        const res = await apiPost('/api/v1/integrations/m365/test-mail', { recipientMailbox: m365TestMailbox });
+        setM365TestResult(res);
+        toast(res.sent ? `Zero-PII link-only email sent to ${m365TestMailbox}` : res.reason || 'Mail dispatch skipped', res.sent ? 'success' : 'warning');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+
+    const handleSyncSharePoint = async () => {
+      try {
+        const res = await apiPost('/api/v1/integrations/m365/sync-sharepoint', {});
+        setM365TestResult(res);
+        toast(`SharePoint sync completed: ${res.syncedCount} synced, ${res.skippedCount} skipped.`);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+
+    const handleSaveColdArchive = async (e) => {
+      e.preventDefault();
+      try {
+        await apiPatch('/api/v1/organisation', {
+          coldArchiveEnabled: coldArchiveCfg.coldArchiveEnabled,
+          coldArchiveMonths: Number(coldArchiveCfg.coldArchiveMonths) || 6,
+        });
+        toast('Cold storage archival policy updated.');
+        loadPanelData();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+
+    const handleRunColdArchiveNow = async () => {
+      try {
+        const res = await apiPost('/api/v1/files/cold-archive/run', {
+          overrideMonths: Number(coldArchiveCfg.coldArchiveMonths) || 6,
+          force: true,
+        });
+        setColdArchiveReport(res);
+        toast(`Cold archive sweep checked ${res.checkedCount} doc(s), purged ${res.archivedCount} local copy/copies.`);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+
     return (
       <div className="space-y-4 max-w-5xl">
+        {/* Microsoft 365 App-Only SharePoint, Outlook & Cold Storage Archive */}
+        <div className="bg-white rounded-md border border-slate-200 p-4 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+            <div>
+              <h4 className="font-semibold text-sm text-slate-800 flex items-center gap-2">
+                <Lock size={15} className="text-[#0088ff]" />
+                <span>Microsoft 365 App-Only Integration (SharePoint, Outlook Mail & Shared Dept Calendars)</span>
+              </h4>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Uses App-Only Client Credentials (Sites.Selected + Mail.Send + Calendars.ReadWrite). Staff log in strictly via personal email + TOTP MFA.
+              </p>
+            </div>
+            <span className={`px-2.5 py-1 rounded text-[11px] font-semibold ${
+              m365Form.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'
+            }`}>
+              Status: {m365Form.status}
+            </span>
+          </div>
+
+          <form onSubmit={handleSaveM365} className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-[11px] font-medium text-slate-700 mb-1">Entra Directory (Tenant) ID</label>
+              <input
+                type="text"
+                value={m365Form.tenantId}
+                onChange={(e) => setM365Form({ ...m365Form, tenantId: e.target.value })}
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-700 mb-1">App Registration (Client) ID</label>
+              <input
+                type="text"
+                value={m365Form.clientId}
+                onChange={(e) => setM365Form({ ...m365Form, clientId: e.target.value })}
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-700 mb-1">
+                Client Secret {m365Form.hasClientSecret ? '(Encrypted in DB — leave blank to keep)' : ''}
+              </label>
+              <input
+                type="password"
+                value={m365Form.clientSecret}
+                onChange={(e) => setM365Form({ ...m365Form, clientSecret: e.target.value })}
+                placeholder={m365Form.hasClientSecret ? '•••••••• (saved encrypted)' : 'Paste Azure Client Secret'}
+                className="w-full px-2.5 py-1.5 border border-slate-300 rounded"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-700 mb-1">SharePoint HR Site URL</label>
+              <input
+                type="url"
+                value={m365Form.sharepointSiteUrl}
+                onChange={(e) => setM365Form({ ...m365Form, sharepointSiteUrl: e.target.value })}
+                className="w-full px-2.5 py-1.5 border border-slate-300 rounded"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-700 mb-1">Outlook Sender (Zero-PII Link Only)</label>
+              <input
+                type="email"
+                value={m365Form.senderMailbox}
+                onChange={(e) => setM365Form({ ...m365Form, senderMailbox: e.target.value })}
+                className="w-full px-2.5 py-1.5 border border-slate-300 rounded"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-700 mb-1">Integration Mode</label>
+              <select
+                value={m365Form.status}
+                onChange={(e) => setM365Form({ ...m365Form, status: e.target.value })}
+                className="w-full px-2.5 py-1.5 border border-slate-300 rounded bg-white"
+              >
+                <option value="ACTIVE">ACTIVE (Dual-Write & Link Alerts Live)</option>
+                <option value="TESTING">TESTING (Staged)</option>
+                <option value="DISABLED">DISABLED (Local AES-256 Vault Only)</option>
+              </select>
+            </div>
+            <div className="md:col-span-3 flex flex-wrap items-center gap-2 pt-1">
+              <button type="submit" className="px-3.5 py-1.5 bg-[#0088ff] text-white rounded font-medium">
+                Save M365 Credentials
+              </button>
+              <button type="button" onClick={handleTestM365Connection} className="px-3 py-1.5 border border-slate-300 rounded font-medium hover:bg-slate-50">
+                Test App-Only Graph Connection
+              </button>
+              <button type="button" onClick={handleSyncSharePoint} className="px-3 py-1.5 border border-emerald-300 text-emerald-700 rounded font-medium hover:bg-emerald-50">
+                Sync Vault Files to SharePoint
+              </button>
+              <div className="flex items-center gap-1.5 ml-auto">
+                <input
+                  type="email"
+                  value={m365TestMailbox}
+                  onChange={(e) => setM365TestMailbox(e.target.value)}
+                  placeholder="audit@ndakalaadvisory.co.ke"
+                  className="px-2.5 py-1 border border-slate-300 rounded w-52"
+                />
+                <button type="button" onClick={handleSendTestM365Mail} className="px-3 py-1.5 bg-slate-800 text-white rounded font-medium">
+                  Send Link-Only Test Mail
+                </button>
+              </div>
+            </div>
+          </form>
+
+          {m365TestResult && (
+            <pre className="bg-slate-50 p-2.5 rounded border border-slate-200 text-[11px] max-h-28 overflow-auto">
+              {JSON.stringify(m365TestResult, null, 2)}
+            </pre>
+          )}
+
+          {/* Cold Storage Archival Routine Setting */}
+          <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+            <form onSubmit={handleSaveColdArchive} className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 font-medium text-slate-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={coldArchiveCfg.coldArchiveEnabled}
+                  onChange={(e) => setColdArchiveCfg({ ...coldArchiveCfg, coldArchiveEnabled: e.target.checked })}
+                />
+                <span>Auto-Archive Cold Local Vault Files to SharePoint</span>
+              </label>
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-600">Retention Threshold (Months):</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={120}
+                  value={coldArchiveCfg.coldArchiveMonths}
+                  onChange={(e) => setColdArchiveCfg({ ...coldArchiveCfg, coldArchiveMonths: Number(e.target.value) })}
+                  className="w-16 px-2 py-1 border border-slate-300 rounded text-center font-semibold"
+                />
+              </div>
+              <button type="submit" className="px-3 py-1 bg-slate-700 text-white rounded font-medium">
+                Save Retention
+              </button>
+            </form>
+            <button
+              type="button"
+              onClick={handleRunColdArchiveNow}
+              className="px-3 py-1.5 border border-indigo-300 text-indigo-700 hover:bg-indigo-50 rounded font-medium"
+            >
+              Run Cold Archive Sweep Now
+            </button>
+          </div>
+          {coldArchiveReport && (
+            <pre className="bg-indigo-50/50 p-2.5 rounded border border-indigo-200 text-[11px] max-h-32 overflow-auto">
+              {JSON.stringify(coldArchiveReport, null, 2)}
+            </pre>
+          )}
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-white rounded-md border border-slate-200 p-4 space-y-3">
             <h4 className="font-semibold text-slate-800 flex items-center gap-2">
@@ -828,8 +1100,243 @@ export default function OrgAdminEnterprisePanels({
       }
     };
 
+    const handleSaveM365 = async (e) => {
+      e.preventDefault();
+      try {
+        await apiPut('/api/v1/integrations/configs/MICROSOFT_365', {
+          status: m365Form.status,
+          isEnabled: m365Form.status !== 'DISABLED',
+          outboundUrl: m365Form.sharepointSiteUrl || undefined,
+          configPayload: {
+            tenantId: m365Form.tenantId.trim(),
+            clientId: m365Form.clientId.trim(),
+            ...(m365Form.clientSecret.trim() ? { clientSecret: m365Form.clientSecret.trim() } : {}),
+            sharepointSiteUrl: m365Form.sharepointSiteUrl.trim(),
+            senderMailbox: m365Form.senderMailbox.trim(),
+            appBaseUrl: m365Form.appBaseUrl.trim(),
+          },
+        });
+        toast('Microsoft 365 App-Only credentials encrypted & saved.');
+        loadPanelData();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+
+    const handleTestM365Connection = async () => {
+      try {
+        const res = await apiPost('/api/v1/integrations/m365/test-connection', {});
+        setM365TestResult(res);
+        toast(res.connected ? 'Microsoft Graph App-Only connection verified!' : res.message || 'Not connected', res.connected ? 'success' : 'warning');
+      } catch (err) {
+        setM365TestResult({ connected: false, error: err.message });
+        toast(err.message, 'error');
+      }
+    };
+
+    const handleSendTestM365Mail = async () => {
+      try {
+        const res = await apiPost('/api/v1/integrations/m365/test-mail', { recipientMailbox: m365TestMailbox });
+        setM365TestResult(res);
+        toast(res.sent ? `Zero-PII link-only email sent to ${m365TestMailbox}` : res.reason || 'Mail dispatch skipped', res.sent ? 'success' : 'warning');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+
+    const handleSyncSharePoint = async () => {
+      try {
+        const res = await apiPost('/api/v1/integrations/m365/sync-sharepoint', {});
+        setM365TestResult(res);
+        toast(`SharePoint sync completed: ${res.syncedCount} synced, ${res.skippedCount} skipped.`);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+
+    const handleSaveColdArchive = async (e) => {
+      e.preventDefault();
+      try {
+        await apiPatch('/api/v1/organisation', {
+          coldArchiveEnabled: coldArchiveCfg.coldArchiveEnabled,
+          coldArchiveMonths: Number(coldArchiveCfg.coldArchiveMonths) || 6,
+        });
+        toast('Cold storage archival policy updated.');
+        loadPanelData();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+
+    const handleRunColdArchiveNow = async () => {
+      try {
+        const res = await apiPost('/api/v1/files/cold-archive/run', {
+          overrideMonths: Number(coldArchiveCfg.coldArchiveMonths) || 6,
+          force: true,
+        });
+        setColdArchiveReport(res);
+        toast(`Cold archive sweep checked ${res.checkedCount} doc(s), purged ${res.archivedCount} local copy/copies.`);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+
     return (
       <div className="space-y-4 max-w-5xl">
+        {/* Microsoft 365 App-Only SharePoint, Outlook & Cold Storage Archive */}
+        <div className="bg-white rounded-md border border-slate-200 p-4 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+            <div>
+              <h4 className="font-semibold text-sm text-slate-800 flex items-center gap-2">
+                <Lock size={15} className="text-[#0088ff]" />
+                <span>Microsoft 365 App-Only Integration (SharePoint, Outlook Mail & Shared Dept Calendars)</span>
+              </h4>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Uses App-Only Client Credentials (Sites.Selected + Mail.Send + Calendars.ReadWrite). Staff log in strictly via personal email + TOTP MFA.
+              </p>
+            </div>
+            <span className={`px-2.5 py-1 rounded text-[11px] font-semibold ${
+              m365Form.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'
+            }`}>
+              Status: {m365Form.status}
+            </span>
+          </div>
+
+          <form onSubmit={handleSaveM365} className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-[11px] font-medium text-slate-700 mb-1">Entra Directory (Tenant) ID</label>
+              <input
+                type="text"
+                value={m365Form.tenantId}
+                onChange={(e) => setM365Form({ ...m365Form, tenantId: e.target.value })}
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-700 mb-1">App Registration (Client) ID</label>
+              <input
+                type="text"
+                value={m365Form.clientId}
+                onChange={(e) => setM365Form({ ...m365Form, clientId: e.target.value })}
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-700 mb-1">
+                Client Secret {m365Form.hasClientSecret ? '(Encrypted in DB — leave blank to keep)' : ''}
+              </label>
+              <input
+                type="password"
+                value={m365Form.clientSecret}
+                onChange={(e) => setM365Form({ ...m365Form, clientSecret: e.target.value })}
+                placeholder={m365Form.hasClientSecret ? '•••••••• (saved encrypted)' : 'Paste Azure Client Secret'}
+                className="w-full px-2.5 py-1.5 border border-slate-300 rounded"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-700 mb-1">SharePoint HR Site URL</label>
+              <input
+                type="url"
+                value={m365Form.sharepointSiteUrl}
+                onChange={(e) => setM365Form({ ...m365Form, sharepointSiteUrl: e.target.value })}
+                className="w-full px-2.5 py-1.5 border border-slate-300 rounded"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-700 mb-1">Outlook Sender (Zero-PII Link Only)</label>
+              <input
+                type="email"
+                value={m365Form.senderMailbox}
+                onChange={(e) => setM365Form({ ...m365Form, senderMailbox: e.target.value })}
+                className="w-full px-2.5 py-1.5 border border-slate-300 rounded"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-700 mb-1">Integration Mode</label>
+              <select
+                value={m365Form.status}
+                onChange={(e) => setM365Form({ ...m365Form, status: e.target.value })}
+                className="w-full px-2.5 py-1.5 border border-slate-300 rounded bg-white"
+              >
+                <option value="ACTIVE">ACTIVE (Dual-Write & Link Alerts Live)</option>
+                <option value="TESTING">TESTING (Staged)</option>
+                <option value="DISABLED">DISABLED (Local AES-256 Vault Only)</option>
+              </select>
+            </div>
+            <div className="md:col-span-3 flex flex-wrap items-center gap-2 pt-1">
+              <button type="submit" className="px-3.5 py-1.5 bg-[#0088ff] text-white rounded font-medium">
+                Save M365 Credentials
+              </button>
+              <button type="button" onClick={handleTestM365Connection} className="px-3 py-1.5 border border-slate-300 rounded font-medium hover:bg-slate-50">
+                Test App-Only Graph Connection
+              </button>
+              <button type="button" onClick={handleSyncSharePoint} className="px-3 py-1.5 border border-emerald-300 text-emerald-700 rounded font-medium hover:bg-emerald-50">
+                Sync Vault Files to SharePoint
+              </button>
+              <div className="flex items-center gap-1.5 ml-auto">
+                <input
+                  type="email"
+                  value={m365TestMailbox}
+                  onChange={(e) => setM365TestMailbox(e.target.value)}
+                  placeholder="audit@ndakalaadvisory.co.ke"
+                  className="px-2.5 py-1 border border-slate-300 rounded w-52"
+                />
+                <button type="button" onClick={handleSendTestM365Mail} className="px-3 py-1.5 bg-slate-800 text-white rounded font-medium">
+                  Send Link-Only Test Mail
+                </button>
+              </div>
+            </div>
+          </form>
+
+          {m365TestResult && (
+            <pre className="bg-slate-50 p-2.5 rounded border border-slate-200 text-[11px] max-h-28 overflow-auto">
+              {JSON.stringify(m365TestResult, null, 2)}
+            </pre>
+          )}
+
+          {/* Cold Storage Archival Routine Setting */}
+          <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+            <form onSubmit={handleSaveColdArchive} className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 font-medium text-slate-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={coldArchiveCfg.coldArchiveEnabled}
+                  onChange={(e) => setColdArchiveCfg({ ...coldArchiveCfg, coldArchiveEnabled: e.target.checked })}
+                />
+                <span>Auto-Archive Cold Local Vault Files to SharePoint</span>
+              </label>
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-600">Retention Threshold (Months):</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={120}
+                  value={coldArchiveCfg.coldArchiveMonths}
+                  onChange={(e) => setColdArchiveCfg({ ...coldArchiveCfg, coldArchiveMonths: Number(e.target.value) })}
+                  className="w-16 px-2 py-1 border border-slate-300 rounded text-center font-semibold"
+                />
+              </div>
+              <button type="submit" className="px-3 py-1 bg-slate-700 text-white rounded font-medium">
+                Save Retention
+              </button>
+            </form>
+            <button
+              type="button"
+              onClick={handleRunColdArchiveNow}
+              className="px-3 py-1.5 border border-indigo-300 text-indigo-700 hover:bg-indigo-50 rounded font-medium"
+            >
+              Run Cold Archive Sweep Now
+            </button>
+          </div>
+          {coldArchiveReport && (
+            <pre className="bg-indigo-50/50 p-2.5 rounded border border-indigo-200 text-[11px] max-h-32 overflow-auto">
+              {JSON.stringify(coldArchiveReport, null, 2)}
+            </pre>
+          )}
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <form onSubmit={handleCreateDsr} className="bg-white rounded-md border border-slate-200 p-4 space-y-2.5">
             <h4 className="font-semibold text-slate-800 flex items-center gap-2">

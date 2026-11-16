@@ -90,6 +90,8 @@ export function createOrganisationRouter(deps: AppDeps): Router {
       timezone: z.string().optional(),
       currencyCode: z.string().length(3).optional(),
       workCalendar: z.string().optional(),
+      coldArchiveMonths: z.number().int().min(1).max(120).optional(),
+      coldArchiveEnabled: z.boolean().optional(),
     }),
     handler: async ({ body, auth, req, deps }) => {
       let org = await deps.prisma.organisation.findFirst();
@@ -150,6 +152,7 @@ export function createOrganisationRouter(deps: AppDeps): Router {
       parentDepartmentId: z.string().uuid().optional(),
       costCenterId: z.string().uuid().optional(),
       headOfDepartmentId: z.string().uuid().optional(),
+      sharedM365Mailbox: z.string().email().optional().nullable(),
       effectiveFrom: z.string().datetime().optional(),
     }),
     handler: async ({ body, auth, req, deps }) => {
@@ -168,6 +171,7 @@ export function createOrganisationRouter(deps: AppDeps): Router {
           parentDepartmentId: body.parentDepartmentId,
           costCenterId: body.costCenterId,
           headOfDepartmentId: body.headOfDepartmentId,
+          sharedM365Mailbox: body.sharedM365Mailbox || null,
           effectiveFrom: body.effectiveFrom ? new Date(body.effectiveFrom) : new Date(),
         },
       });
@@ -199,6 +203,10 @@ export function createOrganisationRouter(deps: AppDeps): Router {
       headOfDepartmentId: z.string().uuid().nullable().optional(),
       parentDepartmentId: z.string().uuid().nullable().optional(),
       costCenterId: z.string().uuid().nullable().optional(),
+      sharedM365Mailbox: z.preprocess(
+        (v) => (typeof v === 'string' && v.trim() === '' ? null : v),
+        z.string().email().nullable().optional(),
+      ),
       isActive: z.boolean().optional(),
     }),
     handler: async ({ params, body, auth, req, deps }) => {
@@ -223,6 +231,7 @@ export function createOrganisationRouter(deps: AppDeps): Router {
           ...(body.headOfDepartmentId !== undefined ? { headOfDepartmentId: body.headOfDepartmentId } : {}),
           ...(body.parentDepartmentId !== undefined ? { parentDepartmentId: body.parentDepartmentId } : {}),
           ...(body.costCenterId !== undefined ? { costCenterId: body.costCenterId } : {}),
+          ...(body.sharedM365Mailbox !== undefined ? { sharedM365Mailbox: body.sharedM365Mailbox } : {}),
           ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
         },
         include: {

@@ -5,6 +5,15 @@ import type { AppDeps } from '../../core/http/context.js';
 import { IntegrationService } from './service.js';
 import { auditCtx } from '../employees/util.js';
 import { IntegrationProvider } from './types.js';
+import {
+  acquireAppOnlyToken,
+  getActiveM365Config,
+  resolveSharePointFolderForCategory,
+  resolveSharePointSiteAndDrive,
+  sendM365NotificationEmail,
+  uploadFileToSharePoint,
+} from '../m365/client.js';
+import { localFileExists, readFile as readLocalEncryptedFile } from '../../core/storage/storage.js';
 
 export function createIntegrationsRouter(deps: AppDeps): Router {
   const router = Router();
@@ -227,6 +236,103 @@ export function createIntegrationsRouter(deps: AppDeps): Router {
     handler: async ({ req }) => {
       const provider = req.query.provider as IntegrationProvider | undefined;
       return service.listWebhookLogs(provider);
+    },
+  });
+
+  // 12. Microsoft 365 App-Only Connectivity Test
+  registerRoute(router, deps, {
+    method: 'post',
+    path: '/integrations/m365/test-connection',
+    auth: { permission: 'integrations.manage' },
+    handler: async ({ deps }) => {
+      const cfg = await getActiveM365Config(deps.prisma);
+      if (!cfg) {
+        return {
+          connected: false,
+          mode: 'APP_ONLY_CLIENT_CREDENTIALS',
+          message: 'Microsoft 365 integration is inactive or missing Tenant ID / Client ID / Client Secret.',
+        };
+      }
+      await acquireAppOnlyToken(cfg);
+      const { siteId, driveId } = await resolveSharePointSiteAndDrive(cfg);
+      return {
+        connected: true,
+        mode: 'APP_ONLY_CLIENT_CREDENTIALS',
+        siteId,
+        driveId,
+        senderMailbox: cfg.senderMailbox,
+      };
+    },
+  });
+
+  // 13. Microsoft 365 Link-Only Zero-PII Mail Test
+  registerRoute(router, deps, {
+    method: 'post',
+    path: '/integrations/m365/test-mail',
+    auth: { permission: 'integrations.manage' },
+    body: z.object({
+      recipientMailbox: z.string().email(),
+    }),
+    handler: async ({ body, deps }) => {
+      const cfg = await getActiveM365Config(deps.prisma);
+      if (!cfg) {
+        return { sent: false, reason: 'Microsoft 365 integration is not ACTIVE' };
+      }
+      return sendM365NotificationEmail(cfg, {
+        recipientMailbox: body.recipientMailbox,
+        subject: 'Microsoft 365 Integration Connectivity Verification',
+        safeSummary:
+          'Your Ndakala HR Portal link-only notification channel is active. Sign in with your individual account and TOTP MFA to inspect tasks.',
+        deepLink: '/files',
+      });
+    },
+  });
+
+  // 14. Microsoft 365 SharePoint Bulk Dual-Write Sync for Unsynced Documents
+  registerRoute(router, deps, {
+    method: 'post',
+    path: '/integrations/m365/sync-sharepoint',
+    auth: { permission: 'integrations.manage' },
+    handler: async ({ deps }) => {
+      const cfg = await getActiveM365Config(deps.prisma);
+      if (!cfg) {
+        return { syncedCount: 0, skippedCount: 0, message: 'Microsoft 365 integration is not ACTIVE' };
+      }
+      const pendingDocs = await deps.prisma.documentRecord.findMany({
+        where: { sharepointItemId: null, localStoragePurged: false },
+        include: {
+          folder: { select: { name: true } },
+          employeeDocuments: { include: { employee: { select: { employeeNumber: true } } } },
+        },
+        take: 100,
+      });
+
+      let syncedCount = 0;
+      let skippedCount = 0;
+      for (const doc of pendingDocs) {
+        if (!localFileExists(doc.storageKey)) {
+          skippedCount++;
+          continue;
+        }
+        const buf = readLocalEncryptedFile(doc.storageKey);
+        const empNo = doc.employeeDocuments[0]?.employee?.employeeNumber || null;
+        const spFolder = resolveSharePointFolderForCategory(doc.category, doc.folder?.name, empNo);
+        const uploaded = await uploadFileToSharePoint(cfg, spFolder, doc.fileName, buf, doc.mimeType);
+        await deps.prisma.documentRecord.update({
+          where: { id: doc.id },
+          data: {
+            externalProvider: 'DUAL_WRITE_SHAREPOINT',
+            sharepointSiteId: uploaded.siteId,
+            sharepointDriveId: uploaded.driveId,
+            sharepointItemId: uploaded.itemId,
+            sharepointETag: uploaded.eTag || null,
+            lastSyncedAt: new Date(),
+          },
+        });
+        syncedCount++;
+      }
+
+      return { syncedCount, skippedCount };
     },
   });
 

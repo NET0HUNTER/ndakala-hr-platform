@@ -23,6 +23,8 @@ model Organisation {
   leaveYearStart     String   @default("01-01")
   financialYearStart String   @default("01-01")
   workCalendar       String   @default("{\"workingDays\":[\"Monday\",\"Tuesday\",\"Wednesday\",\"Thursday\",\"Friday\",\"Saturday\"],\"restDays\":[\"Sunday\"]}")
+  coldArchiveMonths  Int      @default(6)
+  coldArchiveEnabled Boolean  @default(false)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }
@@ -34,6 +36,7 @@ model Department {
   parentDepartmentId String?
   costCenterId       String?
   headOfDepartmentId String?
+  sharedM365Mailbox  String?
   isActive           Boolean    @default(true)
   effectiveFrom      DateTime   @default(now())
   effectiveTo        DateTime?
@@ -124,6 +127,9 @@ model User {
   lockedUntil         DateTime?
   departmentId        String?
   positionId          String?
+  departmentM365Email String?
+  entraObjectId       String?   @unique
+  ssoEnabled          Boolean   @default(false)
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -292,43 +298,107 @@ model WorkflowTask {
   instance        WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
 }
 
-model DocumentRecord {
-  id                     String   @id @default(uuid())
-  fileName               String
-  mimeType               String
-  fileSizeBytes          Int
-  storageKey             String   @unique
-  storagePath            String
-  checksumSha256         String
-  category               String   // POLICY, ORGANISATION, COMPLIANCE, EMPLOYEE
-  securityClassification String   @default("INTERNAL") // PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED
-  version                Int      @default(1)
-  uploadedById           String
-  isMalwareScanned       Boolean  @default(true)
-  isArchived             Boolean  @default(false)
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+model DocumentFolder {
+  id           String           @id @default(uuid())
+  code         String?          @unique
+  name         String
+  scope        String           @default("ORG") // ORG, EMPLOYEE, TEMPLATES
+  parentId     String?
+  departmentId String?
+  locationId   String?
+  description  String?
+  createdById  String
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
 
-  employeeDocuments      EmployeeDocument[]
+  parent       DocumentFolder?  @relation("FolderHierarchy", fields: [parentId], references: [id])
+  children     DocumentFolder[] @relation("FolderHierarchy")
+  documents    DocumentRecord[]
+
+  @@index([scope, name])
+}
+
+model HrTemplate {
+  id           String          @id @default(uuid())
+  code         String?         @unique
+  name         String
+  description  String
+  category     String          @default("HANDBOOK") // HANDBOOK, LETTER, FORM, ONBOARDING
+  schemaJson   String          @default("[]")
+  bodyTemplate String?
+  documentId   String?
+  isActive     Boolean         @default(true)
+  createdById  String
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  document     DocumentRecord? @relation(fields: [documentId], references: [id])
+}
+
+model DocumentRecord {
+  id                      String    @id @default(uuid())
+  fileName                String
+  description             String?
+  mimeType                String
+  fileSizeBytes           Int
+  storageKey              String    @unique
+  storagePath             String
+  checksumSha256          String
+  category                String    // POLICY, ORGANISATION, COMPLIANCE, EMPLOYEE, TEMPLATE
+  securityClassification  String    @default("INTERNAL") // PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED
+  version                 Int       @default(1)
+  uploadedById            String
+  updatedById             String?
+  folderId                String?
+  expiryDate              DateTime?
+  locationId              String?
+  departmentId            String?
+  shareScope              String    @default("ORG") // ORG, SPECIFIC, ROLE, EMPLOYEE, RESTRICTED
+  sharedRoleKeysJson      String?
+  sharedDepartmentIdsJson String?
+  sharedLocationIdsJson   String?
+  sharedEmployeeIdsJson   String?
+  externalProvider        String    @default("LOCAL") // LOCAL, DUAL_WRITE_SHAREPOINT, SHAREPOINT_ARCHIVE
+  sharepointSiteId        String?
+  sharepointDriveId       String?
+  sharepointItemId        String?
+  sharepointETag          String?
+  lastSyncedAt            DateTime?
+  lastAccessedAt          DateTime?
+  localStoragePurged      Boolean   @default(false)
+  localPurgedAt           DateTime?
+  isMalwareScanned        Boolean   @default(true)
+  isArchived              Boolean   @default(false)
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  folder                  DocumentFolder?    @relation(fields: [folderId], references: [id])
+  employeeDocuments       EmployeeDocument[]
+  templates               HrTemplate[]
+
+  @@index([category, isArchived])
+  @@index([folderId])
 }
 
 model Notification {
-  id              String    @id @default(uuid())
-  recipientUserId String
-  title           String
-  message         String
-  channel         String    @default("IN_APP") // IN_APP, EMAIL
-  status          String    @default("PENDING") // PENDING, DELIVERED, FAILED
-  attempts        Int       @default(0)
-  maxAttempts     Int       @default(3)
-  lastAttemptAt   DateTime?
-  nextAttemptAt   DateTime?
-  idempotencyKey  String?   @unique
-  failureReason   String?
-  isRead          Boolean   @default(false)
-  deepLink        String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                     String    @id @default(uuid())
+  recipientUserId        String
+  title                  String
+  message                String
+  channel                String    @default("IN_APP") // IN_APP, EMAIL
+  status                 String    @default("PENDING") // PENDING, DELIVERED, FAILED
+  attempts               Int       @default(0)
+  maxAttempts            Int       @default(3)
+  lastAttemptAt          DateTime?
+  nextAttemptAt          DateTime?
+  idempotencyKey         String?   @unique
+  externalMessageId      String?
+  outlookCalendarEventId String?
+  failureReason          String?
+  isRead                 Boolean   @default(false)
+  deepLink               String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 }
 
 // -------------------------------------------------------------

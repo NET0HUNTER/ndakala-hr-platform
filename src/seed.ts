@@ -1,7 +1,10 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { PERMISSION_CATALOG, BASELINE_ROLES } from './core/permissions/catalog.js';
 import { hashPassword } from './core/auth/password.js';
+import { storeFile, localFileExists } from './core/storage/storage.js';
 
 export async function seedDatabase(prisma: PrismaClient) {
   console.log('Seeding Ndakala HR Platform foundation...');
@@ -1487,6 +1490,264 @@ async function seedPhase8(prisma: PrismaClient) {
           status: 'PENDING',
         },
       ],
+    });
+  }
+
+  await seedFilesHubTemplatesAndRealPolicies(prisma);
+}
+
+async function seedFilesHubTemplatesAndRealPolicies(prisma: PrismaClient) {
+  const actor =
+    (await prisma.user.findUnique({ where: { email: 'ict.admin@ndakalaadvisory.co.ke' } })) ||
+    (await prisma.user.findFirst({ orderBy: { createdAt: 'asc' } }));
+  const actorId = actor?.id || 'system';
+
+  // 1. Seed Standard Organization & Template Folders
+  const foldersSpec = [
+    {
+      code: 'FOLDER-ORG-HR',
+      name: 'HR & Employment Policies',
+      scope: 'ORG',
+      description: 'Core people policies, code of conduct, leave, performance & separation governance',
+    },
+    {
+      code: 'FOLDER-ORG-ITSEC',
+      name: 'IT, Cybersecurity & Data Privacy',
+      scope: 'ORG',
+      description: 'ICT acceptable use, access control, backup, logging & DPA 2019 privacy policies',
+    },
+    {
+      code: 'FOLDER-ORG-RISK',
+      name: 'Compliance & Risk Governance',
+      scope: 'ORG',
+      description: 'Occupational safety & health (OSH), enterprise risk management & whistleblowing policies',
+    },
+    {
+      code: 'FOLDER-HR-TEMPLATES',
+      name: 'HR Forms & Templates',
+      scope: 'ORG',
+      description: 'Compiled HR handbooks, official letters & employee forms generated cleanly to PDF',
+    },
+  ];
+
+  const folderMap = new Map<string, string>();
+  for (const f of foldersSpec) {
+    const folder = await prisma.documentFolder.upsert({
+      where: { code: f.code },
+      create: {
+        code: f.code,
+        name: f.name,
+        scope: f.scope,
+        description: f.description,
+        createdById: actorId,
+      },
+      update: {
+        name: f.name,
+        description: f.description,
+      },
+    });
+    folderMap.set(f.code, folder.id);
+  }
+
+  // 2. Seed Shared Department M365 Mailboxes cleanly if currently unset
+  const mailboxSeeds: Array<[string, string]> = [
+    ['EXEC', 'partners@ndakalaadvisory.co.ke'],
+    ['TAX-ADV', 'tax@ndakalaadvisory.co.ke'],
+    ['AUDIT', 'audit@ndakalaadvisory.co.ke'],
+    ['HR-OPS', 'hr@ndakalaadvisory.co.ke'],
+    ['FINANCE', 'finance@ndakalaadvisory.co.ke'],
+  ];
+  for (const [code, mailbox] of mailboxSeeds) {
+    await prisma.department
+      .updateMany({
+        where: { code, sharedM365Mailbox: null },
+        data: { sharedM365Mailbox: mailbox },
+      })
+      .catch(() => {});
+  }
+
+  // 3. Ingest 22 Real Company Policy PDFs from assets/policies/
+  const policiesManifest = [
+    { file: 'Code of Conduct Policy.pdf', title: 'Code of Conduct Policy', code: 'POL-NDA-01', folderCode: 'FOLDER-ORG-HR', owner: 'Human Resources', category: 'CODE_OF_CONDUCT', status: 'PUBLISHED' },
+    { file: 'Disciplinary Policy.pdf', title: 'Disciplinary Policy', code: 'POL-NDA-02', folderCode: 'FOLDER-ORG-HR', owner: 'Human Resources', category: 'OPERATIONAL', status: 'PUBLISHED' },
+    { file: 'Diversity Equity and Inclusion Policy.pdf', title: 'Diversity, Equity & Inclusion Policy', code: 'POL-NDA-03', folderCode: 'FOLDER-ORG-HR', owner: 'Human Resources', category: 'DEI', status: 'PUBLISHED' },
+    { file: 'Dress code  Policy.pdf', title: 'Dress Code Policy', code: 'POL-NDA-04', folderCode: 'FOLDER-ORG-HR', owner: 'Human Resources', category: 'OPERATIONAL', status: 'PUBLISHED' },
+    { file: 'Grievance Procedure  Policy.pdf', title: 'Grievance Procedure Policy', code: 'POL-NDA-05', folderCode: 'FOLDER-ORG-HR', owner: 'Human Resources', category: 'ANTI_HARASSMENT', status: 'PUBLISHED' },
+    { file: 'Leave Management Policy.pdf', title: 'Leave Management Policy', code: 'POL-NDA-06', folderCode: 'FOLDER-ORG-HR', owner: 'Human Resources', category: 'OPERATIONAL', status: 'PUBLISHED' },
+    { file: 'Performance Management Policy.pdf', title: 'Performance Management Policy', code: 'POL-NDA-07', folderCode: 'FOLDER-ORG-HR', owner: 'Human Resources', category: 'OPERATIONAL', status: 'PUBLISHED' },
+    { file: 'Separation Management Policy.pdf', title: 'Separation Management Policy', code: 'POL-NDA-08', folderCode: 'FOLDER-ORG-HR', owner: 'Human Resources', category: 'OPERATIONAL', status: 'PUBLISHED' },
+    { file: 'Sexual Harassment and Discrimination  Policy.pdf', title: 'Sexual Harassment & Discrimination Policy', code: 'POL-NDA-09', folderCode: 'FOLDER-ORG-HR', owner: 'Human Resources', category: 'ANTI_HARASSMENT', status: 'PUBLISHED' },
+    { file: 'Transfer Policy.pdf', title: 'Transfer Policy', code: 'POL-NDA-10', folderCode: 'FOLDER-ORG-HR', owner: 'Human Resources', category: 'OPERATIONAL', status: 'PUBLISHED' },
+    { file: 'Working Hours Policy.pdf', title: 'Working Hours Policy', code: 'POL-NDA-11', folderCode: 'FOLDER-ORG-HR', owner: 'Human Resources', category: 'OPERATIONAL', status: 'PUBLISHED' },
+    { file: 'Acceptable User Policy  (1).pdf', title: 'Acceptable Use Policy', code: 'POL-NDA-12', folderCode: 'FOLDER-ORG-ITSEC', owner: 'ICT & Security', category: 'INFORMATION_SECURITY', status: 'PUBLISHED' },
+    { file: 'Cybersecurity Awareness and Training.pdf', title: 'Cybersecurity Awareness & Training Policy', code: 'POL-NDA-13', folderCode: 'FOLDER-ORG-ITSEC', owner: 'ICT & Security', category: 'INFORMATION_SECURITY', status: 'PUBLISHED' },
+    { file: 'DATA PRIVACY POLICY.pdf', title: 'Data Privacy Policy (KDPA 2019)', code: 'POL-NDA-14', folderCode: 'FOLDER-ORG-ITSEC', owner: 'Compliance & DPO', category: 'INFORMATION_SECURITY', status: 'PUBLISHED' },
+    { file: 'Information Management Policy.pdf', title: 'Information Management Policy', code: 'POL-NDA-15', folderCode: 'FOLDER-ORG-ITSEC', owner: 'ICT & Security', category: 'INFORMATION_SECURITY', status: 'PUBLISHED' },
+    { file: 'IT Asset Management Policy  (1).pdf', title: 'IT Asset Management Policy', code: 'POL-NDA-16', folderCode: 'FOLDER-ORG-ITSEC', owner: 'ICT & Security', category: 'INFORMATION_SECURITY', status: 'PUBLISHED' },
+    { file: 'Logging and monitoring policy  .pdf', title: 'Logging & Monitoring Policy', code: 'POL-NDA-17', folderCode: 'FOLDER-ORG-ITSEC', owner: 'ICT & Security', category: 'INFORMATION_SECURITY', status: 'PUBLISHED' },
+    { file: 'Access Control draft.pdf', title: 'Access Control Policy (Draft)', code: 'POL-NDA-18', folderCode: 'FOLDER-ORG-ITSEC', owner: 'ICT & Security', category: 'INFORMATION_SECURITY', status: 'DRAFT' },
+    { file: 'Data Backup Policy draft.pdf', title: 'Data Backup Policy (Draft)', code: 'POL-NDA-19', folderCode: 'FOLDER-ORG-ITSEC', owner: 'ICT & Security', category: 'INFORMATION_SECURITY', status: 'DRAFT' },
+    { file: 'Occupational Safety , Health and Environment Policy.pdf', title: 'Occupational Safety, Health & Environment Policy', code: 'POL-NDA-20', folderCode: 'FOLDER-ORG-RISK', owner: 'Operations & Risk', category: 'OSH', status: 'PUBLISHED' },
+    { file: 'RISK MANAGEMENT POLICY.pdf', title: 'Enterprise Risk Management Policy', code: 'POL-NDA-21', folderCode: 'FOLDER-ORG-RISK', owner: 'Operations & Risk', category: 'OPERATIONAL', status: 'PUBLISHED' },
+    { file: 'Whistle blowing policy.pdf', title: 'Whistleblowing Policy', code: 'POL-NDA-22', folderCode: 'FOLDER-ORG-RISK', owner: 'Compliance & Risk', category: 'CODE_OF_CONDUCT', status: 'PUBLISHED' },
+  ];
+
+  const assetsDir = path.resolve(process.cwd(), 'assets/policies');
+  if (fs.existsSync(assetsDir)) {
+    for (const item of policiesManifest) {
+      const fullSrcPath = path.join(assetsDir, item.file);
+      if (!fs.existsSync(fullSrcPath)) continue;
+
+      const folderId = folderMap.get(item.folderCode) || null;
+      const cleanName = item.file.replace(/\s+/g, ' ').trim();
+
+      let docRecord = await prisma.documentRecord.findFirst({
+        where: { category: 'POLICY', fileName: cleanName },
+      });
+
+      if (!docRecord || (!docRecord.localStoragePurged && !localFileExists(docRecord.storageKey))) {
+        const buf = fs.readFileSync(fullSrcPath);
+        const stored = storeFile(buf, cleanName);
+        if (!docRecord) {
+          docRecord = await prisma.documentRecord.create({
+            data: {
+              fileName: cleanName,
+              description: `${item.title} — Ndakala Advisory Official Policy Document (${item.status})`,
+              mimeType: 'application/pdf',
+              fileSizeBytes: buf.length,
+              storageKey: stored.storageKey,
+              storagePath: stored.storagePath,
+              checksumSha256: stored.checksumSha256,
+              category: 'POLICY',
+              securityClassification: item.status === 'DRAFT' ? 'CONFIDENTIAL' : 'INTERNAL',
+              uploadedById: actorId,
+              updatedById: actorId,
+              folderId,
+              shareScope: item.status === 'DRAFT' ? 'ROLE' : 'ORG',
+              sharedRoleKeysJson:
+                item.status === 'DRAFT' ? JSON.stringify(['ict_admin', 'managing_partner', 'head_of_hr']) : null,
+              lastAccessedAt: new Date(),
+            },
+          });
+        } else {
+          docRecord = await prisma.documentRecord.update({
+            where: { id: docRecord.id },
+            data: {
+              storageKey: stored.storageKey,
+              storagePath: stored.storagePath,
+              checksumSha256: stored.checksumSha256,
+              folderId: docRecord.folderId || folderId,
+            },
+          });
+        }
+      }
+
+      const polDoc = await prisma.policyDocument.upsert({
+        where: { code: item.code },
+        create: {
+          code: item.code,
+          title: item.title,
+          owner: item.owner,
+          targetAudience: item.status === 'DRAFT' ? 'MANAGERS' : 'ALL_STAFF',
+          category: item.category,
+        },
+        update: {
+          title: item.title,
+          owner: item.owner,
+        },
+      });
+
+      await prisma.policyVersion.upsert({
+        where: {
+          policyId_versionNumber: {
+            policyId: polDoc.id,
+            versionNumber: item.status === 'DRAFT' ? '0.9-draft' : '1.0',
+          },
+        },
+        create: {
+          policyId: polDoc.id,
+          versionNumber: item.status === 'DRAFT' ? '0.9-draft' : '1.0',
+          contentSummary: `${item.title} (${cleanName})`,
+          documentId: docRecord.id,
+          effectiveDate: new Date('2026-01-01'),
+          status: item.status,
+          isImmutable: item.status === 'PUBLISHED',
+          sourceReference: `Ndakala Advisory Official Register (${item.code})`,
+          publishedAt: item.status === 'PUBLISHED' ? new Date('2026-01-01') : null,
+        },
+        update: {
+          documentId: docRecord.id,
+        },
+      });
+    }
+  }
+
+  // 4. Seed Zoho-Parity HR Forms & Templates (Company Handbook Template + Dynamic Forms)
+  const templates = [
+    {
+      code: 'TPL-HANDBOOK-001',
+      name: 'Company Handbook Template',
+      description:
+        "A sample company handbook that can be edited and used to guide your employees and convey your company's vision, mission and operating policies.",
+      category: 'HANDBOOK',
+      schemaJson: JSON.stringify([
+        { key: 'documentTitle', label: 'Handbook Edition Title', type: 'text', defaultValue: 'Ndakala Advisory Employee Handbook 2026' },
+        { key: 'visionStatement', label: 'Vision Statement', type: 'textarea', defaultValue: 'To deliver trusted tax, audit, risk and governance advisory across East Africa.' },
+        { key: 'missionStatement', label: 'Mission Statement', type: 'textarea', defaultValue: 'Empowering clients through rigorous integrity, continuous learning, and people-first excellence.' },
+        { key: 'operatingPolicies', label: 'Core Operating Policies Summary', type: 'textarea', defaultValue: 'All employees adhere to Ndakala Code of Conduct, KDPA 2019 Data Privacy, and Cybersecurity MFA policies.' },
+      ]),
+      bodyTemplate:
+        'Vision:\n{{visionStatement}}\n\nMission:\n{{missionStatement}}\n\nOperating Standards:\n{{operatingPolicies}}',
+    },
+    {
+      code: 'TPL-ADDR-PROOF-001',
+      name: 'Address Proof & Employment Confirmation Form',
+      description:
+        'Native React HR letter form verifying active employment status and official Nairobi/Kenya residential address for banking or statutory use.',
+      category: 'LETTER',
+      schemaJson: JSON.stringify([
+        { key: 'documentTitle', label: 'Letter Title', type: 'text', defaultValue: 'Official Address Proof & Employment Verification' },
+        { key: 'addressedTo', label: 'Addressed To (Bank / Embassy / Institution)', type: 'text', defaultValue: 'To Whom It May Concern' },
+        { key: 'residentialAddress', label: 'Confirmed Residential Address', type: 'textarea', defaultValue: 'Nairobi, Kenya' },
+        { key: 'purposeNote', label: 'Purpose / Confirmation Statement', type: 'textarea', defaultValue: 'This confirms the above-named individual is an active employee of Ndakala Advisory LLP in good standing.' },
+      ]),
+      bodyTemplate:
+        'To: {{addressedTo}}\nEmployee: {{employeeName}} ({{employeeNumber}}) — {{position}}, {{department}}\nConfirmed Residential Address: {{residentialAddress}}\n\nStatement:\n{{purposeNote}}',
+    },
+    {
+      code: 'TPL-CERT-SERVICE-001',
+      name: 'Certificate of Service Form',
+      description:
+        'Formal statutory Certificate of Service under Kenya Employment Act s.51 generated cleanly into an immutable PDF.',
+      category: 'FORM',
+      schemaJson: JSON.stringify([
+        { key: 'documentTitle', label: 'Certificate Title', type: 'text', defaultValue: 'Certificate of Service' },
+        { key: 'servicePeriod', label: 'Period of Service', type: 'text', defaultValue: 'From Commencement Date to Current / Exit Date' },
+        { key: 'dutiesSummary', label: 'Summary of Duties & Conduct', type: 'textarea', defaultValue: 'Executed professional advisory and operational engagements diligently and ethically.' },
+      ]),
+      bodyTemplate:
+        'Employee: {{employeeName}} ({{employeeNumber}})\nDesignation & Department: {{position}} — {{department}}\nPeriod of Service: {{servicePeriod}}\n\nSummary of Service:\n{{dutiesSummary}}',
+    },
+  ];
+
+  for (const tpl of templates) {
+    await prisma.hrTemplate.upsert({
+      where: { code: tpl.code },
+      create: {
+        code: tpl.code,
+        name: tpl.name,
+        description: tpl.description,
+        category: tpl.category,
+        schemaJson: tpl.schemaJson,
+        bodyTemplate: tpl.bodyTemplate,
+        createdById: actorId,
+      },
+      update: {
+        name: tpl.name,
+        description: tpl.description,
+        schemaJson: tpl.schemaJson,
+        bodyTemplate: tpl.bodyTemplate,
+      },
     });
   }
 }

@@ -4,7 +4,8 @@ import { conflict, forbidden, notFound, validation } from '../../core/errors/err
 import type { Db } from './ledger.js';
 import { postLedgerEntry, reverseLedgerEntry } from './ledger.js';
 import { calculateWorkingDays, type WorkScheduleRef } from './calculator.js';
-import { notifyUser, notifyRole } from '../notifications/service.js';
+import { notifyUser, notifyRole, dispatchOutlookLinkNotification } from '../notifications/service.js';
+import { createSharedCalendarFreeEvent, getActiveM365Config } from '../m365/client.js';
 
 export interface SubmitLeaveRequestInput {
   leaveTypeCode: string;
@@ -421,7 +422,15 @@ export async function reviewLeaveRequest(
   const req = await prisma.leaveRequest.findUnique({
     where: { id: input.requestId },
     include: {
-      employee: { select: { id: true, userId: true, firstName: true, lastName: true } },
+      employee: {
+        select: {
+          id: true,
+          userId: true,
+          firstName: true,
+          lastName: true,
+          department: { select: { sharedM365Mailbox: true } },
+        },
+      },
       leaveType: true,
       reservations: { where: { status: 'ACTIVE' } },
     },
@@ -442,7 +451,7 @@ export async function reviewLeaveRequest(
   const reservation = req.reservations[0];
   const now = new Date();
 
-  return prisma.$transaction(async (tx) => {
+  const txResult = await prisma.$transaction(async (tx) => {
     if (input.decision === 'APPROVE') {
       // 1. Post debit ledger entry (-workingDaysDeducted)
       const { entry, balance } = await postLedgerEntry(tx, {
@@ -574,6 +583,42 @@ export async function reviewLeaveRequest(
       return { request: returned };
     }
   });
+
+  if (input.decision === 'APPROVE') {
+    try {
+      if (req.employee.userId) {
+        await dispatchOutlookLinkNotification(prisma, req.employee.userId, {
+          title: 'Leave Request Approved',
+          message: `Your leave request ${req.requestNumber} (${req.leaveType.name}) has been approved. Sign in to view details.`,
+          deepLink: `/leave-requests/${req.id}`,
+        });
+      }
+
+      const m365 = await getActiveM365Config(prisma);
+      if (m365) {
+        let mailbox = req.employee.department?.sharedM365Mailbox || '';
+        if (!mailbox && req.employee.userId) {
+          const usr = await prisma.user.findUnique({
+            where: { id: req.employee.userId },
+            select: { departmentM365Email: true },
+          });
+          mailbox = usr?.departmentM365Email || '';
+        }
+        if (mailbox) {
+          await createSharedCalendarFreeEvent(m365, {
+            sharedMailbox: mailbox,
+            subject: `[Away] ${req.employee.firstName} ${req.employee.lastName} - ${req.leaveType.name}`,
+            startDate: req.startDate.toISOString().slice(0, 10),
+            endDateInclusive: req.endDate.toISOString().slice(0, 10),
+          });
+        }
+      }
+    } catch {
+      // M365 notification/calendar sync is best-effort and never rolls back approved leave
+    }
+  }
+
+  return txResult;
 }
 
 /**

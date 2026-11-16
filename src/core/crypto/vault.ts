@@ -5,7 +5,7 @@ const IV_LENGTH = 12;
 const TAG_LENGTH = 16;
 const PREFIX = 'enc:v1:';
 
-function getMasterKey(): Buffer {
+export function getMasterKey(): Buffer {
   const envKey = process.env.ENCRYPTION_MASTER_KEY?.trim();
   if (envKey) {
     if (/^[0-9a-fA-F]{64}$/.test(envKey)) return Buffer.from(envKey, 'hex');

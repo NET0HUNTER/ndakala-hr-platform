@@ -96,6 +96,7 @@ export default function OrgSettingsPanel({
     name: '',
     headOfDepartmentId: '',
     parentDepartmentId: '',
+    sharedM365Mailbox: '',
   });
 
   const [desigFilter, setDesigFilter] = useState('');
@@ -273,7 +274,7 @@ export default function OrgSettingsPanel({
   const handleOpenAddDepartment = () => {
     setEditingDeptId(null);
     setOriginalDeptName('');
-    setDeptForm({ code: '', name: '', headOfDepartmentId: '', parentDepartmentId: '' });
+    setDeptForm({ code: '', name: '', headOfDepartmentId: '', parentDepartmentId: '', sharedM365Mailbox: '' });
     setDeptModalOpen(true);
   };
 
@@ -285,6 +286,7 @@ export default function OrgSettingsPanel({
       name: dept.name || '',
       headOfDepartmentId: dept.headOfDepartmentId || '',
       parentDepartmentId: dept.parentDepartmentId || '',
+      sharedM365Mailbox: dept.sharedM365Mailbox || '',
     });
     setDeptModalOpen(true);
   };
@@ -297,6 +299,7 @@ export default function OrgSettingsPanel({
           name: deptForm.name,
           headOfDepartmentId: deptForm.headOfDepartmentId || null,
           parentDepartmentId: deptForm.parentDepartmentId || null,
+          sharedM365Mailbox: deptForm.sharedM365Mailbox || null,
         });
         toast('Department updated.');
       } else {
@@ -304,13 +307,14 @@ export default function OrgSettingsPanel({
           name: deptForm.name,
           ...(deptForm.headOfDepartmentId ? { headOfDepartmentId: deptForm.headOfDepartmentId } : {}),
           ...(deptForm.parentDepartmentId ? { parentDepartmentId: deptForm.parentDepartmentId } : {}),
+          ...(deptForm.sharedM365Mailbox ? { sharedM365Mailbox: deptForm.sharedM365Mailbox } : {}),
         });
         toast('Department added.');
       }
       setDeptModalOpen(false);
       setEditingDeptId(null);
       setOriginalDeptName('');
-      setDeptForm({ code: '', name: '', headOfDepartmentId: '', parentDepartmentId: '' });
+      setDeptForm({ code: '', name: '', headOfDepartmentId: '', parentDepartmentId: '', sharedM365Mailbox: '' });
       loadOrgData();
       if (onRefreshAll) onRefreshAll();
     } catch (err) {
@@ -963,7 +967,7 @@ export default function OrgSettingsPanel({
                         </span>
                       </td>
                       <td className="py-3.5 px-5 text-[#0088ff] font-medium">{d.users}</td>
-                      <td className="py-3.5 px-5 text-slate-500">{d.alias}</td>
+                      <td className="py-3.5 px-5 text-slate-500">{d.sharedM365Mailbox || d.alias || '-'}</td>
                       <td className="py-3.5 px-5 text-slate-600">{displayLead}</td>
                       <td className="py-3.5 px-5 text-right">
                         {d.id && (
@@ -1299,6 +1303,18 @@ export default function OrgSettingsPanel({
                     </option>
                   ))}
                 </select>
+              </div>
+              <div className="space-y-1">
+                <label className="block text-[11px] font-medium text-slate-700">
+                  Shared M365 Mailbox / Dept Calendar Email
+                </label>
+                <input
+                  type="email"
+                  placeholder="e.g. tax@ndakalaadvisory.co.ke"
+                  value={deptForm.sharedM365Mailbox}
+                  onChange={(e) => setDeptForm({ ...deptForm, sharedM365Mailbox: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:border-[#0088ff]"
+                />
               </div>
               <button type="submit" className="w-full py-2 bg-[#0088ff] hover:bg-[#0073d9] text-white rounded font-medium">
                 {editingDeptId ? 'Save Changes' : 'Save Department'}

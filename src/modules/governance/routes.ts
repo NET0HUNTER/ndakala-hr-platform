@@ -102,9 +102,25 @@ export function createGovernanceRouter(deps: AppDeps): Router {
       });
       if (!version) throw notFound('PolicyVersion', params.versionId);
 
-      const pendingCount = await deps.prisma.policyAcknowledgement.count({
+      const pendingAcks = await deps.prisma.policyAcknowledgement.findMany({
         where: { policyVersionId: version.id, status: 'PENDING' },
+        include: {
+          employee: { select: { userId: true } },
+        },
       });
+      const pendingCount = pendingAcks.length;
+
+      const { notifyUser } = await import('../notifications/service.js');
+      for (const ack of pendingAcks) {
+        if (ack.employee?.userId) {
+          await notifyUser(deps.prisma, ack.employee.userId, {
+            title: 'Policy Acknowledgement Reminder',
+            message: `Action required: please review and acknowledge ${version.policy.code} (v${version.versionNumber}) inside the Governance Portal.`,
+            deepLink: '/operations/policies',
+            idempotencyKey: `policy-remind:${version.id}:${ack.employee.userId}:${new Date().toISOString().slice(0, 10)}`,
+          });
+        }
+      }
 
       const { writeAudit } = await import('../../core/audit/audit.js');
       await writeAudit(deps.prisma, auditCtx(auth, req), {

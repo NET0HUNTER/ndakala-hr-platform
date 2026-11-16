@@ -244,6 +244,45 @@ export function createIdentityRouter(deps: AppDeps): Router {
     },
   });
 
+  // 1c. Hidden Break-Glass M365 SSO Guard (IT Admin / Managing Partner ONLY — rejects standard staff)
+  registerRoute(router, deps, {
+    method: 'post',
+    path: '/auth/m365/break-glass',
+    auth: 'public',
+    body: z.object({
+      email: z.string().email().toLowerCase(),
+      entraObjectId: z.string().optional(),
+    }),
+    handler: async ({ body, req, deps }) => {
+      const user = await deps.prisma.user.findUnique({
+        where: { email: body.email },
+        select: { id: true, email: true, isActive: true, ssoEnabled: true, entraObjectId: true },
+      });
+      if (!user || !user.isActive || !user.ssoEnabled) {
+        await writeAudit(
+          deps.prisma,
+          { userId: user?.id, email: body.email, ip: req.ip, correlationId: req.requestId },
+          {
+            action: 'AUTH_M365_SSO_DENIED',
+            targetType: 'User',
+            targetId: user?.id,
+            outcome: 'BLOCKED',
+            reason: 'M365 SSO disabled for shared department mailbox policy; sign in with personal email + TOTP.',
+          },
+        );
+        throw forbidden(
+          'Microsoft 365 SSO is disabled for standard staff accounts to protect data isolation on shared department mailboxes. Sign in with your registered personal email and TOTP code.',
+        );
+      }
+      return {
+        breakGlassEligible: true,
+        email: user.email,
+        entraObjectId: user.entraObjectId,
+        message: 'Break-glass admin SSO check passed.',
+      };
+    },
+  });
+
   // 2. Auth Logout
   registerRoute(router, deps, {
     method: 'post',
@@ -292,6 +331,8 @@ export function createIdentityRouter(deps: AppDeps): Router {
           mustChangePassword: true,
           departmentId: true,
           positionId: true,
+          departmentM365Email: true,
+          ssoEnabled: true,
         },
       });
       const employeeId = user
@@ -370,6 +411,8 @@ export function createIdentityRouter(deps: AppDeps): Router {
           mfaEnabled: true,
           departmentId: true,
           positionId: true,
+          departmentM365Email: true,
+          ssoEnabled: true,
           createdAt: true,
           roleAssignments: {
             where: {
@@ -398,6 +441,8 @@ export function createIdentityRouter(deps: AppDeps): Router {
       password: z.string().min(8),
       departmentId: z.string().uuid().optional(),
       positionId: z.string().uuid().optional(),
+      departmentM365Email: z.string().email().toLowerCase().optional(),
+      ssoEnabled: z.boolean().optional(),
     }),
     handler: async ({ body, auth, req, deps }) => {
       assertPasswordPolicy(body.password);
@@ -412,9 +457,11 @@ export function createIdentityRouter(deps: AppDeps): Router {
           passwordHash,
           departmentId: body.departmentId,
           positionId: body.positionId,
+          departmentM365Email: body.departmentM365Email || null,
+          ssoEnabled: body.ssoEnabled ?? false,
           mustChangePassword: true,
         },
-        select: { id: true, email: true, name: true, isActive: true },
+        select: { id: true, email: true, name: true, isActive: true, departmentM365Email: true },
       });
 
       await writeAudit(
@@ -515,6 +562,43 @@ export function createIdentityRouter(deps: AppDeps): Router {
       );
 
       return user;
+    },
+  });
+
+  // 8b. Update User M365 Shared Mailbox Routing / Break-Glass SSO flag
+  registerRoute(router, deps, {
+    method: 'patch',
+    path: '/users/:id/m365-routing',
+    auth: { permission: 'users.manage' },
+    params: z.object({ id: z.string().uuid() }),
+    body: z.object({
+      departmentM365Email: z.preprocess(
+        (v) => (typeof v === 'string' && v.trim() === '' ? null : v),
+        z.string().email().toLowerCase().nullable().optional(),
+      ),
+      ssoEnabled: z.boolean().optional(),
+    }),
+    handler: async ({ params, body, auth, req, deps }) => {
+      const updated = await deps.prisma.user.update({
+        where: { id: params.id },
+        data: {
+          ...(body.departmentM365Email !== undefined ? { departmentM365Email: body.departmentM365Email } : {}),
+          ...(body.ssoEnabled !== undefined ? { ssoEnabled: body.ssoEnabled } : {}),
+        },
+        select: { id: true, email: true, departmentM365Email: true, ssoEnabled: true },
+      });
+      await writeAudit(
+        deps.prisma,
+        { userId: auth.userId, email: auth.email, role: auth.roles[0], correlationId: req.requestId },
+        {
+          action: 'USER_M365_ROUTING_UPDATED',
+          targetType: 'User',
+          targetId: params.id,
+          outcome: 'SUCCESS',
+          after: updated,
+        },
+      );
+      return updated;
     },
   });
 

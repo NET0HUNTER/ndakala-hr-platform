@@ -5,6 +5,16 @@ import { writeAudit, type AuditContext } from '../../core/audit/audit.js';
 import { validation, forbidden, notFound, conflict } from '../../core/errors/errors.js';
 import { encrypt, decrypt, timingSafeEqualString } from '../../core/crypto/vault.js';
 import {
+  acquireAppOnlyToken,
+  clearM365TokenCache,
+  getActiveM365Config,
+  resolveSharePointFolderForCategory,
+  resolveSharePointSiteAndDrive,
+  sendM365NotificationEmail,
+  uploadFileToSharePoint,
+} from '../m365/client.js';
+import { readFile as readLocalEncryptedFile, localFileExists } from '../../core/storage/storage.js';
+import {
   IntegrationProvider,
   IntegrationBoundaryProfile,
   WebhookVerificationResult,
@@ -20,22 +30,23 @@ import {
 const APPROVED_PROFILES: Record<IntegrationProvider, IntegrationBoundaryProfile> = {
   MICROSOFT_365: {
     provider: 'MICROSOFT_365',
-    name: 'Microsoft 365 / Entra ID Identity & Mail',
-    businessPurpose: 'Workforce single sign-on (SSO), identity provisioning, and corporate email/Teams notifications',
+    name: 'Microsoft 365 App-Only (SharePoint, Outlook Mail & Shared Dept Calendars)',
+    businessPurpose: 'App-Only SharePoint master vault dual-write & cold archival, link-only Outlook notifications from noreply@ndakalaadvisory.co.ke to department mailboxes, and non-blocking All-Day free calendar visibility',
     systemOwner: 'ICT & Security Administrator',
     lawfulPurpose: 'Performance of employment contract and legitimate business operational communication',
-    dataMinimisationSummary: 'Restricted strictly to corporate work email, legal full name, job title, and active directory status. No personal financial, medical, or statutory ID is transmitted.',
-    authenticationMethod: 'OAuth 2.0 / OpenID Connect with least-privilege delegated scopes',
-    scopes: ['openid', 'profile', 'email', 'User.Read', 'Mail.Send'],
+    dataMinimisationSummary: 'Zero-PII link-only email notices (no attachments, no salaries/medical details); standard staff authenticate locally with personal email + TOTP (SSO disabled for shared licenses).',
+    authenticationMethod: 'App-Only OAuth 2.0 Client Credentials + SharePoint Sites.Selected (Admin break-glass SSO only)',
+    scopes: ['Sites.Selected', 'Mail.Send', 'Calendars.ReadWrite'],
     vendorProcessorObligations: 'Microsoft Online Services Terms (OST) and EU/Kenya Data Protection Addendum (DPA) with standard contractual clauses',
-    retentionPolicy: 'Active directory attributes aligned to employment term; notification delivery logs purged after 90 days',
-    rollbackProcedure: 'Revoke enterprise application credentials in Entra ID portal; revert to native database password auth',
+    retentionPolicy: 'SharePoint retains immutable master copies & cold archives (>6m); notification delivery logs retained cleanly in PostgreSQL',
+    rollbackProcedure: 'Disable integration status; local AES-256 encrypted vault remains 100% operational immediately',
     isOutboundAllowed: true,
     isInboundWebhookAllowed: true,
     disallowedActions: [
-      'Writing unapproved directory attributes to tenant',
-      'Exporting bank, salary, or medical data to M365',
-      'Bulk harvesting personal workforce telemetry',
+      'Using Delegated User OAuth for standard staff across shared department licenses',
+      'Opening confidential employee documents or payslips in Word Online',
+      'Triggering Outlook Out-of-Office (MailboxSettings) automatic replies on shared mailboxes',
+      'Transmitting attachments, salary amounts, medical notes, or ER allegations via Outlook',
     ],
   },
   SECURE_STORAGE: {
@@ -182,6 +193,25 @@ export class IntegrationService {
     return profile;
   }
 
+  private extractSafeConfigSummary(provider: string, configPayloadEncrypted?: string | null) {
+    if (provider !== 'MICROSOFT_365' || !configPayloadEncrypted) return undefined;
+    try {
+      const parsed = JSON.parse(decrypt(configPayloadEncrypted) || '{}');
+      return {
+        tenantId: parsed.tenantId || '',
+        clientId: parsed.clientId || '',
+        sharepointSiteUrl: parsed.sharepointSiteUrl || '',
+        sharepointSiteId: parsed.sharepointSiteId || '',
+        sharepointDriveId: parsed.sharepointDriveId || '',
+        senderMailbox: parsed.senderMailbox || 'noreply@ndakalaadvisory.co.ke',
+        appBaseUrl: parsed.appBaseUrl || 'https://ndakalahr.duckdns.org',
+        hasClientSecret: Boolean(parsed.clientSecret),
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
   async listConfigurations() {
     const configs = await this.prisma.integrationConfig.findMany({
       orderBy: { provider: 'asc' },
@@ -199,7 +229,8 @@ export class IntegrationService {
       dataMinimisationSummary: c.dataMinimisationSummary,
       allowedScopes: c.scopes ? JSON.parse(c.scopes) : [],
       outboundUrl: c.outboundUrl,
-      hasSecret: !!c.webhookSecretEncrypted,
+      hasSecret: !!c.webhookSecretEncrypted || !!c.configPayloadEncrypted,
+      settingsSummary: this.extractSafeConfigSummary(c.provider, c.configPayloadEncrypted),
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
     }));
@@ -239,7 +270,8 @@ export class IntegrationService {
       dataMinimisationSummary: config.dataMinimisationSummary,
       allowedScopes: config.scopes ? JSON.parse(config.scopes) : [],
       outboundUrl: config.outboundUrl,
-      hasSecret: !!config.webhookSecretEncrypted,
+      hasSecret: !!config.webhookSecretEncrypted || !!config.configPayloadEncrypted,
+      settingsSummary: this.extractSafeConfigSummary(config.provider, config.configPayloadEncrypted),
       createdAt: config.createdAt,
       updatedAt: config.updatedAt,
     };
@@ -269,8 +301,25 @@ export class IntegrationService {
       }
     }
 
+    // Preserve existing secret fields on partial M365 edits when clientSecret is omitted/blank
+    let mergedPayload = input.configPayload;
+    if (provider === 'MICROSOFT_365' && mergedPayload) {
+      const existing = await this.prisma.integrationConfig.findUnique({ where: { provider } });
+      if (existing?.configPayloadEncrypted) {
+        try {
+          const prev = JSON.parse(decrypt(existing.configPayloadEncrypted) || '{}');
+          if (!mergedPayload.clientSecret && prev.clientSecret) {
+            mergedPayload = { ...prev, ...mergedPayload, clientSecret: prev.clientSecret };
+          }
+        } catch {
+          // ignore
+        }
+      }
+      clearM365TokenCache();
+    }
+
     const secretEncrypted = input.webhookSecret ? encrypt(input.webhookSecret) : undefined;
-    const payloadEncrypted = input.configPayload ? encrypt(JSON.stringify(input.configPayload)) : undefined;
+    const payloadEncrypted = mergedPayload ? encrypt(JSON.stringify(mergedPayload)) : undefined;
 
     const computedStatus = input.status || (input.isEnabled === false ? 'DISABLED' : 'TESTING');
 

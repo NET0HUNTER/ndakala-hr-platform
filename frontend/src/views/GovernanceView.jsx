@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import TimeTrackerView from './TimeTrackerView';
+import FilesView from './FilesView';
+import InlineDocumentViewerModal from './modals/InlineDocumentViewerModal';
 import {
   Calendar,
   ChevronLeft,
@@ -155,7 +157,14 @@ export default function GovernanceView({
   const [addressErrors, setAddressErrors] = useState({});
 
   // ==================== MODE C: GOVERNANCE (POLICIES, TRAINING, DOCS, ER) ====================
-  const [govSubTab, setGovSubTab] = useState('policies'); // policies | training | documents | er
+  const [govSubTab, setGovSubTab] = useState(
+    subViewHint === 'documents' || topContextTab === 'files'
+      ? 'documents'
+      : topContextTab === 'ercases'
+      ? 'er'
+      : 'policies'
+  ); // policies | training | documents | er
+  const [policyPreviewDoc, setPolicyPreviewDoc] = useState(null);
   const [acknowledgements, setAcknowledgements] = useState([]);
   const [programmes, setProgrammes] = useState([]);
   const [phishingRecords, setPhishingRecords] = useState([]);
@@ -280,6 +289,12 @@ export default function GovernanceView({
       setTimeSubTab(topContextTab === 'shifts' || subViewHint === 'shifts' ? 'shifts' : 'attendance');
     } else if (activeTab === 'timetracker' && (timeSubTab === 'attendance' || timeSubTab === 'shifts')) {
       setTimeSubTab('timelogs');
+    } else if (activeTab === 'admin') {
+      if (topContextTab === 'ercases') {
+        setGovSubTab('er');
+      } else if (subViewHint === 'documents') {
+        setGovSubTab('documents');
+      }
     }
   }, [activeTab, topContextTab, subViewHint]);
 
@@ -2485,7 +2500,7 @@ export default function GovernanceView({
           {[
             { id: 'policies', label: `Policies (${policies.length})` },
             { id: 'training', label: `Training & Security (${programmes.length})` },
-            { id: 'documents', label: `Document Vault (${vaultDocs.length})` },
+            { id: 'documents', label: `Files Hub (${vaultDocs.length})` },
             { id: 'er', label: `ER Cases (${erCases.length})` },
           ].map((t) => (
             <button
@@ -2535,6 +2550,22 @@ export default function GovernanceView({
                         <td className="py-3 px-4 text-slate-600">{pol.category}</td>
                         <td className="py-3 px-4 text-slate-600">{latestVer ? `v${latestVer.versionNumber} (${latestVer.status})` : 'v1.0'}</td>
                         <td className="py-3 px-4 text-right space-x-2">
+                          {latestVer?.documentId && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPolicyPreviewDoc({
+                                  id: latestVer.documentId,
+                                  fileName: `${pol.code} - ${pol.title}.pdf`,
+                                  mimeType: 'application/pdf',
+                                  securityClassification: latestVer.status === 'DRAFT' ? 'CONFIDENTIAL' : 'INTERNAL',
+                                })
+                              }
+                              className="px-2.5 py-1 border border-slate-200 text-slate-700 hover:bg-slate-50 rounded text-[11px] font-medium"
+                            >
+                              Preview PDF
+                            </button>
+                          )}
                           {canManagePolicy && latestVer && latestVer.status !== 'PUBLISHED' && (
                             isSelfAuthor ? (
                               <span
@@ -2872,97 +2903,14 @@ export default function GovernanceView({
       )}
 
       {/* Document Vault Tab */}
+      {/* Unified Zoho-Parity Files Hub Tab (SharePoint App-Only Proxy, Templates & Inline Viewer) */}
       {govSubTab === 'documents' && (
-        <div className="bg-white rounded-md border border-slate-200 p-4 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h4 className="font-semibold text-slate-800">Secure Document Vault ({vaultDocs.length})</h4>
-            {canUploadDocs && (
-              <div className="flex flex-wrap items-center gap-2">
-                <select value={newDocForm.category} onChange={(e) => setNewDocForm({ ...newDocForm, category: e.target.value })} className="px-2.5 py-1.5 border rounded bg-white">
-                  <option value="POLICY">Policy</option>
-                  <option value="COMPLIANCE">Compliance</option>
-                  <option value="ORGANISATION">Organisation</option>
-                </select>
-                <select value={newDocForm.securityClassification} onChange={(e) => setNewDocForm({ ...newDocForm, securityClassification: e.target.value })} className="px-2.5 py-1.5 border rounded bg-white">
-                  <option value="INTERNAL">INTERNAL</option>
-                  <option value="CONFIDENTIAL">CONFIDENTIAL</option>
-                  <option value="RESTRICTED">RESTRICTED</option>
-                  <option value="PUBLIC">PUBLIC</option>
-                </select>
-                <label className="px-3 py-1.5 bg-[#0088ff] text-white rounded font-medium cursor-pointer">
-                  Upload Document
-                  <input
-                    type="file"
-                    className="hidden"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      const reader = new FileReader();
-                      reader.onload = async () => {
-                        const b64 = String(reader.result).split(',')[1] || '';
-                        try {
-                          await apiPost('/api/v1/documents/upload', {
-                            fileName: file.name,
-                            mimeType: file.type || 'application/octet-stream',
-                            category: newDocForm.category,
-                            securityClassification: newDocForm.securityClassification,
-                            fileBase64: b64,
-                          });
-                          onShowToast && onShowToast(`Uploaded ${file.name}.`);
-                          await loadGovernanceExtras();
-                        } catch (err) {
-                          onShowToast && onShowToast(err?.message || 'Upload rejected', 'error');
-                        }
-                      };
-                      reader.readAsDataURL(file);
-                    }}
-                  />
-                </label>
-              </div>
-            )}
-          </div>
-          <table className="w-full text-left border-collapse">
-            <thead className="bg-slate-50 border-b text-slate-600">
-              <tr>
-                <th className="py-2 px-3">File Name</th>
-                <th className="py-2 px-3">Category</th>
-                <th className="py-2 px-3">Classification</th>
-                <th className="py-2 px-3">Size</th>
-                <th className="py-2 px-3 text-right">Download</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {vaultDocs.map((d) => (
-                <tr key={d.id}>
-                  <td className="py-2 px-3 font-medium text-slate-800">{d.fileName}</td>
-                  <td className="py-2 px-3">{d.category}</td>
-                  <td className="py-2 px-3">{d.securityClassification}</td>
-                  <td className="py-2 px-3">{Math.max(1, Math.round((d.fileSizeBytes || 0) / 1024))} KB</td>
-                  <td className="py-2 px-3 text-right">
-                    {canDownloadDocs ? (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            const tok = await apiPost(`/api/v1/documents/${d.id}/token`, {});
-                            await apiDownload(tok.downloadUrl || `/api/v1/documents/download?token=${tok.downloadToken}`, d.fileName);
-                            onShowToast && onShowToast(`Downloaded ${d.fileName} via signed token.`);
-                          } catch (err) {
-                            onShowToast && onShowToast(err?.message || 'Download failed', 'error');
-                          }
-                        }}
-                        className="text-[#0088ff] font-medium hover:underline"
-                      >
-                        Signed Download
-                      </button>
-                    ) : (
-                      <span className="text-slate-400">View Only</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="bg-white rounded-md border border-slate-200 overflow-hidden min-h-[560px] flex flex-col">
+          <FilesView
+            currentUser={currentUser}
+            employees={employees}
+            onShowToast={onShowToast}
+          />
         </div>
       )}
 
@@ -3334,6 +3282,14 @@ export default function GovernanceView({
             </form>
           </div>
         </div>
+      )}
+
+      {policyPreviewDoc && (
+        <InlineDocumentViewerModal
+          doc={policyPreviewDoc}
+          onClose={() => setPolicyPreviewDoc(null)}
+          onShowToast={onShowToast}
+        />
       )}
     </div>
   );
