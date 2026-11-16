@@ -258,6 +258,7 @@ export async function seedDatabase(prisma: PrismaClient) {
   await seedPhase5(prisma);
   await seedPhase6(prisma);
   await seedPhase8(prisma);
+  await seedFilesHubTemplatesAndRealPolicies(prisma);
 
   console.log('Database seeding successfully completed.');
 }
@@ -1492,8 +1493,6 @@ async function seedPhase8(prisma: PrismaClient) {
       ],
     });
   }
-
-  await seedFilesHubTemplatesAndRealPolicies(prisma);
 }
 
 async function seedFilesHubTemplatesAndRealPolicies(prisma: PrismaClient) {
