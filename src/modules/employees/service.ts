@@ -356,7 +356,7 @@ export async function createEmployee(prisma: PrismaClient, auth: AuthContext, in
     });
 
     return { employee, ictRequestId: ict.id, tasksCreated, probationRecordId };
-  });
+  }, { timeout: 20000 });
 
   const warnings: string[] = [];
   if (!template) warnings.push('No ACTIVE onboarding template matched this employee; no checklist tasks were generated. HR must activate a template or add tasks manually.');
