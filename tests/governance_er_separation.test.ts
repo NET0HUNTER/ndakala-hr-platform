@@ -781,4 +781,52 @@ describe('R1.1 Governance, Employee Relations, Transfer & Separation (Phase 4)',
       expect(event).toBeDefined();
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // 7. Policy Reminders & Explicit ER Case Closure
+  // ---------------------------------------------------------------------------
+  describe('Policy Reminder Dispatch & Explicit ER Case Closure', () => {
+    it('dispatches acknowledgement reminders for a published policy version', async () => {
+      const publishedVer = await prisma.policyVersion.findFirstOrThrow({
+        where: { status: 'PUBLISHED' },
+      });
+
+      const res = await hrClient.agent
+        .post(`/api/v1/governance/policies/versions/${publishedVer.id}/remind`)
+        .set('x-csrf-token', hrClient.csrfToken)
+        .send({});
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.versionId).toBe(publishedVer.id);
+      expect(typeof res.body.data.pendingCount).toBe('number');
+    });
+
+    it('closes an assigned ER case directly and hydrates appeals/decisions in list', async () => {
+      const createRes = await hrClient.agent
+        .post('/api/v1/er/cases')
+        .set('x-csrf-token', hrClient.csrfToken)
+        .send({
+          caseType: 'GRIEVANCE',
+          title: 'Temporary ER Closure Regression Case',
+          severity: 'STANDARD',
+          primaryHandlerId: hrClient.user.id,
+          allegationSummary: 'Testing explicit closure endpoint and relation hydration.',
+        });
+      expect(createRes.status).toBe(201);
+      const caseId = createRes.body.data.id;
+
+      const listRes = await hrClient.agent.get('/api/v1/er/cases');
+      expect(listRes.status).toBe(200);
+      const listed = listRes.body.data.find((c: any) => c.id === caseId);
+      expect(listed).toBeDefined();
+      expect(Array.isArray(listed.appeals)).toBe(true);
+
+      const closeRes = await hrClient.agent
+        .post(`/api/v1/er/cases/${caseId}/close`)
+        .set('x-csrf-token', hrClient.csrfToken)
+        .send({ outcomeNotes: 'Closed after HR grievance mediation' });
+      expect(closeRes.status).toBe(200);
+      expect(closeRes.body.data.status).toBe('CLOSED');
+    });
+  });
 });

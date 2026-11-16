@@ -666,4 +666,49 @@ export class ErService {
 
     return updated;
   }
+
+  async closeCase(params: {
+    caseId: string;
+    outcomeNotes: string;
+    closedByUserId: string;
+    auditCtx: AuditContext;
+  }) {
+    const erCase = await this.prisma.erCase.findUniqueOrThrow({
+      where: { id: params.caseId },
+    });
+
+    const closed = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.erCase.update({
+        where: { id: erCase.id },
+        data: {
+          status: 'CLOSED',
+          closedAt: new Date(),
+          closedById: params.closedByUserId,
+          closureSummary: params.outcomeNotes,
+        },
+      });
+
+      await tx.erCaseEvent.create({
+        data: {
+          caseId: erCase.id,
+          eventType: 'CASE_CLOSED',
+          description: `Case formally closed: ${params.outcomeNotes}`,
+          actorUserId: params.closedByUserId,
+          correlationId: params.auditCtx.correlationId,
+        },
+      });
+
+      await writeAudit(tx, params.auditCtx, {
+        action: 'ER_CASE_CLOSED',
+        targetType: 'ErCase',
+        targetId: erCase.id,
+        outcome: 'SUCCESS',
+        after: { caseNumber: erCase.caseNumber, closureSummary: params.outcomeNotes },
+      });
+
+      return updated;
+    });
+
+    return closed;
+  }
 }

@@ -572,7 +572,7 @@ export default function App() {
 
   const handleCompleteTraining = async (assignmentId) => {
     try {
-      await apiPost(`/api/v1/governance/training/assignments/${assignmentId}/complete`, { scorePct: 100 });
+      await apiPost(`/api/v1/governance/training/assignments/${assignmentId}/complete`, { scorePercent: 100, passed: true });
       showToast('Training module marked complete.');
       await fetchAllData();
     } catch (err) {

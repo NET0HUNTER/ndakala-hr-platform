@@ -89,6 +89,11 @@ export function createErRouter(deps: AppDeps): Router {
 
       if (isManagingPartner) {
         return deps.prisma.erCase.findMany({
+          include: {
+            appeals: { orderBy: { createdAt: 'desc' } },
+            hearings: { orderBy: { createdAt: 'desc' } },
+            decisions: { orderBy: { createdAt: 'desc' } },
+          },
           orderBy: { createdAt: 'desc' },
         });
       }
@@ -106,6 +111,11 @@ export function createErRouter(deps: AppDeps): Router {
             { assignedInvestigatorId: userId },
             { id: { in: assignedCaseIds } },
           ],
+        },
+        include: {
+          appeals: { orderBy: { createdAt: 'desc' } },
+          hearings: { orderBy: { createdAt: 'desc' } },
+          decisions: { orderBy: { createdAt: 'desc' } },
         },
         orderBy: { createdAt: 'desc' },
       });
@@ -295,6 +305,26 @@ export function createErRouter(deps: AppDeps): Router {
         outcome: body.outcome,
         comments: body.comments,
         reviewerUserId: auth.userId,
+        auditCtx: auditCtx(auth, req),
+      });
+    },
+  });
+
+  // 13. Formal Case Closure
+  registerRoute(router, deps, {
+    method: 'post',
+    path: '/er/cases/:id/close',
+    auth: { permission: 'er.case.handle' },
+    params: z.object({ id: z.string() }),
+    body: z.object({
+      outcomeNotes: z.string().min(5).default('Closed after formal human review'),
+    }),
+    handler: async ({ params, body, auth, req }) => {
+      await service.assertCaseAccess(auth.userId, auth.roles, params.id);
+      return service.closeCase({
+        caseId: params.id,
+        outcomeNotes: body.outcomeNotes,
+        closedByUserId: auth.userId,
         auditCtx: auditCtx(auth, req),
       });
     },

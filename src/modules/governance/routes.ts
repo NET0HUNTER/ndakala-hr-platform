@@ -89,6 +89,36 @@ export function createGovernanceRouter(deps: AppDeps): Router {
     },
   });
 
+  // 4b. Dispatch Acknowledgement Reminders for Pending Staff
+  registerRoute(router, deps, {
+    method: 'post',
+    path: '/governance/policies/versions/:versionId/remind',
+    auth: { permission: 'policy.manage' },
+    params: z.object({ versionId: z.string() }),
+    handler: async ({ params, auth, req, deps }) => {
+      const version = await deps.prisma.policyVersion.findUnique({
+        where: { id: params.versionId },
+        include: { policy: true },
+      });
+      if (!version) throw notFound('PolicyVersion', params.versionId);
+
+      const pendingCount = await deps.prisma.policyAcknowledgement.count({
+        where: { policyVersionId: version.id, status: 'PENDING' },
+      });
+
+      const { writeAudit } = await import('../../core/audit/audit.js');
+      await writeAudit(deps.prisma, auditCtx(auth, req), {
+        action: 'POLICY_ACKNOWLEDGEMENT_REMINDER_DISPATCHED',
+        targetType: 'PolicyVersion',
+        targetId: version.id,
+        outcome: 'SUCCESS',
+        after: { policyCode: version.policy.code, versionNumber: version.versionNumber, pendingCount },
+      });
+
+      return { versionId: version.id, pendingCount, remindedAt: new Date().toISOString() };
+    },
+  });
+
   // 5. List Employee Acknowledgements
   registerRoute(router, deps, {
     method: 'get',

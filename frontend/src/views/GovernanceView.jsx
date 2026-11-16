@@ -48,6 +48,25 @@ export default function GovernanceView({
   onShowToast,
   setActiveTab,
 }) {
+  const userPermissions = new Set(currentUser?.permissions || []);
+  const userRoles = new Set(
+    (currentUser?.roles || (currentUser?.role ? [currentUser.role] : [])).map((r) => String(r).toLowerCase())
+  );
+  const canManagePolicy = userPermissions.has('policy.manage');
+  const canManageTraining = userPermissions.has('training.manage');
+  const canUploadDocs = userPermissions.has('documents.upload');
+  const canDownloadDocs = userPermissions.has('documents.download');
+  const canIntakeEr = userPermissions.has('er.intake');
+  const canHandleEr = userPermissions.has('er.case.handle');
+  const canAppealEr = userPermissions.has('er.case.appeal');
+  const isHrOrAdmin =
+    userRoles.has('system_admin') ||
+    userRoles.has('managing_partner') ||
+    userRoles.has('operations_director') ||
+    userRoles.has('head_of_hr') ||
+    userPermissions.has('employees.view') ||
+    userPermissions.has('config.manage');
+
   // ==================== MODE A: TIME TRACKER, SHIFTS & ATTENDANCE ====================
   const [timeSubTab, setTimeSubTab] = useState(
     activeTab === 'attendance'
@@ -161,6 +180,17 @@ export default function GovernanceView({
   });
   const [assignProgId, setAssignProgId] = useState('');
   const [assignEmpId, setAssignEmpId] = useState('');
+  const [assignDueDate, setAssignDueDate] = useState('2026-12-15');
+  const [newVersionModal, setNewVersionModal] = useState(null);
+  const [newVersionForm, setNewVersionForm] = useState({
+    versionNumber: '2.0',
+    contentSummary: '',
+    effectiveDate: '2026-12-01',
+    sourceReference: 'Ndakala Policy Manual Rev',
+  });
+  const [refusalPromptAck, setRefusalPromptAck] = useState(null);
+  const [refusalReasonText, setRefusalReasonText] = useState('Requires HR policy clause clarification before acknowledgement.');
+  const [inspectedErCase, setInspectedErCase] = useState(null);
   const [newCommForm, setNewCommForm] = useState({
     subject: '',
     channel: 'EMAIL',
@@ -178,6 +208,7 @@ export default function GovernanceView({
     caseType: 'GRIEVANCE',
     title: '',
     severity: 'STANDARD',
+    primaryHandlerId: '',
     allegationSummary: '',
     policyClausesCited: '',
   });
@@ -230,11 +261,14 @@ export default function GovernanceView({
     assigneeEmployeeId: '',
     notes: '',
   });
-  const [erModal, setErModal] = useState(null); // { mode: 'conflict'|'hearing'|'appeal'|'review_appeal', caseItem }
+  const [erModal, setErModal] = useState(null); // { mode: 'conflict'|'hearing'|'decision'|'appeal'|'review_appeal', caseItem }
   const [erModalForm, setErModalForm] = useState({
     natureOfConflict: 'Line-reporting conflict with complainant',
     scheduledDate: '2026-11-25T10:00:00Z',
     locationOrLink: 'Boardroom A / Microsoft Teams',
+    findings: 'Formal investigation findings documented after human review.',
+    sanction: 'WRITTEN_WARNING',
+    appealOfficerId: '',
     grounds: 'Procedural mitigation and new documentary evidence',
     appealId: '',
     outcome: 'UPHELD',
@@ -309,7 +343,9 @@ export default function GovernanceView({
     const [acks, progs, phish, comms, docs] = await Promise.all([
       apiGet('/api/v1/governance/policies/acknowledgements').catch(() => []),
       apiGet('/api/v1/governance/training/programmes').catch(() => []),
-      apiGet('/api/v1/governance/training/phishing-records').catch(() => []),
+      canManageTraining
+        ? apiGet('/api/v1/governance/training/phishing-records').catch(() => [])
+        : Promise.resolve([]),
       apiGet('/api/v1/governance/training/security-comms').catch(() => []),
       apiGet('/api/v1/documents').catch(() => []),
     ]);
@@ -318,7 +354,7 @@ export default function GovernanceView({
     setPhishingRecords(unwrapList(phish));
     setSecurityComms(unwrapList(comms));
     setVaultDocs(unwrapList(docs));
-  }, []);
+  }, [canManageTraining]);
 
   const loadWorkspaceModules = useCallback(async (tabName) => {
     if (tabName === 'shifts' || tabName === 'attendance') {
@@ -1602,7 +1638,7 @@ export default function GovernanceView({
                             Submit
                           </button>
                         )}
-                        {rec.status === 'SUBMITTED' && (
+                        {isHrOrAdmin && rec.status === 'SUBMITTED' && (
                           <>
                             <button
                               type="button"
@@ -1994,7 +2030,7 @@ export default function GovernanceView({
                       }`}>{t.status}</span>
                     </td>
                     <td className="py-2.5 px-3 text-right space-x-2">
-                      {t.status === 'APPROVED' && (
+                      {isHrOrAdmin && t.status === 'APPROVED' && (
                         <button
                           type="button"
                           onClick={async () => {
@@ -2016,36 +2052,40 @@ export default function GovernanceView({
                       )}
                       {t.status === 'SUBMITTED' && (
                         <>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              try {
-                                await apiPatch(`/api/v1/workspace/travel-requests/${t.id}`, { status: 'APPROVED' });
-                                onShowToast && onShowToast('Travel request approved.');
-                                await loadWorkspaceModules('travel');
-                              } catch (err) {
-                                onShowToast && onShowToast(err?.message || 'Approval requires HR/Admin role', 'error');
-                              }
-                            }}
-                            className="text-emerald-600 font-medium hover:underline"
-                          >
-                            Approve
-                          </button>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              try {
-                                await apiPatch(`/api/v1/workspace/travel-requests/${t.id}`, { status: 'REJECTED' });
-                                onShowToast && onShowToast('Travel request rejected.');
-                                await loadWorkspaceModules('travel');
-                              } catch (err) {
-                                onShowToast && onShowToast(err?.message || 'Action restricted', 'error');
-                              }
-                            }}
-                            className="text-rose-600 font-medium hover:underline"
-                          >
-                            Reject
-                          </button>
+                          {isHrOrAdmin && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    await apiPatch(`/api/v1/workspace/travel-requests/${t.id}`, { status: 'APPROVED' });
+                                    onShowToast && onShowToast('Travel request approved.');
+                                    await loadWorkspaceModules('travel');
+                                  } catch (err) {
+                                    onShowToast && onShowToast(err?.message || 'Approval requires HR/Admin role', 'error');
+                                  }
+                                }}
+                                className="text-emerald-600 font-medium hover:underline"
+                              >
+                                Approve
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    await apiPatch(`/api/v1/workspace/travel-requests/${t.id}`, { status: 'REJECTED' });
+                                    onShowToast && onShowToast('Travel request rejected.');
+                                    await loadWorkspaceModules('travel');
+                                  } catch (err) {
+                                    onShowToast && onShowToast(err?.message || 'Action restricted', 'error');
+                                  }
+                                }}
+                                className="text-rose-600 font-medium hover:underline"
+                              >
+                                Reject
+                              </button>
+                            </>
+                          )}
                           <button
                             type="button"
                             onClick={async () => {
@@ -2086,6 +2126,7 @@ export default function GovernanceView({
             </div>
           </div>
 
+          {isHrOrAdmin && (
           <form
             onSubmit={async (e) => {
               e.preventDefault();
@@ -2128,6 +2169,7 @@ export default function GovernanceView({
               </button>
             </div>
           </form>
+          )}
 
           {surveysList.length === 0 ? (
             <NdakalaEmptyState title="No active pulse surveys" subtitle="HR administrators can publish an anonymous engagement survey above to gather staff feedback." />
@@ -2486,40 +2528,73 @@ export default function GovernanceView({
                 <tbody className="divide-y divide-slate-100">
                   {policies.map((pol) => {
                     const latestVer = pol.versions?.[0];
+                    const isSelfAuthor = Boolean(latestVer?.createdById && currentUser?.id && latestVer.createdById === currentUser.id);
                     return (
                       <tr key={pol.id} className="hover:bg-slate-50">
                         <td className="py-3 px-4 font-medium text-slate-800">{pol.code} — {pol.title}</td>
                         <td className="py-3 px-4 text-slate-600">{pol.category}</td>
                         <td className="py-3 px-4 text-slate-600">{latestVer ? `v${latestVer.versionNumber} (${latestVer.status})` : 'v1.0'}</td>
                         <td className="py-3 px-4 text-right space-x-2">
-                          {latestVer && latestVer.status !== 'PUBLISHED' && (
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  await apiPost(`/api/v1/governance/policies/versions/${latestVer.id}/publish`, {});
-                                  onShowToast && onShowToast('Policy version published.');
-                                  onRefreshAll && (await onRefreshAll());
-                                } catch (err) {
-                                  onShowToast && onShowToast(err?.message || 'Publish failed', 'error');
-                                }
-                              }}
-                              className="px-2.5 py-1 bg-emerald-600 text-white rounded text-[11px] font-medium"
-                            >
-                              Publish
-                            </button>
+                          {canManagePolicy && latestVer && latestVer.status !== 'PUBLISHED' && (
+                            isSelfAuthor ? (
+                              <span
+                                title="Maker-Checker enforced: Policy author cannot publish their own version"
+                                className="px-2 py-0.5 rounded border border-amber-300 bg-amber-50 text-amber-800 text-[10px] font-medium cursor-not-allowed"
+                              >
+                                Maker-Checker: Author Cannot Self-Publish
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    await apiPost(`/api/v1/governance/policies/versions/${latestVer.id}/publish`, {});
+                                    onShowToast && onShowToast('Policy version published.');
+                                    onRefreshAll && (await onRefreshAll());
+                                    await loadGovernanceExtras();
+                                  } catch (err) {
+                                    onShowToast && onShowToast(err?.message || 'Publish failed', 'error');
+                                  }
+                                }}
+                                className="px-2.5 py-1 bg-emerald-600 text-white rounded text-[11px] font-medium"
+                              >
+                                Publish
+                              </button>
+                            )
                           )}
-                          {latestVer && latestVer.status === 'PUBLISHED' && (
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                await apiPost(`/api/v1/governance/policies/versions/${latestVer.id}/remind`, {});
-                                onShowToast && onShowToast('Reminders dispatched to pending staff.');
-                              }}
-                              className="px-2.5 py-1 border border-slate-300 rounded text-[11px]"
-                            >
-                              Remind Pending
-                            </button>
+                          {canManagePolicy && latestVer && latestVer.status === 'PUBLISHED' && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const nextVerNum = `${(Number(latestVer.versionNumber) || 1) + 1}.0`;
+                                  setNewVersionForm({
+                                    versionNumber: nextVerNum,
+                                    contentSummary: `Revision ${nextVerNum} for ${pol.title}`,
+                                    effectiveDate: new Date().toISOString().slice(0, 10),
+                                    sourceReference: pol.versions?.[0]?.sourceReference || 'Ndakala Policy Manual',
+                                  });
+                                  setNewVersionModal(pol);
+                                }}
+                                className="px-2.5 py-1 border border-blue-300 text-[#0088ff] rounded text-[11px]"
+                              >
+                                + New Version
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    const rem = await apiPost(`/api/v1/governance/policies/versions/${latestVer.id}/remind`, {});
+                                    onShowToast && onShowToast(`Reminders dispatched (${rem.pendingCount ?? 0} pending staff).`);
+                                  } catch (err) {
+                                    onShowToast && onShowToast(err?.message || 'Reminder failed', 'error');
+                                  }
+                                }}
+                                className="px-2.5 py-1 border border-slate-300 rounded text-[11px]"
+                              >
+                                Remind Pending
+                              </button>
+                            </>
                           )}
                         </td>
                       </tr>
@@ -2534,7 +2609,7 @@ export default function GovernanceView({
           <div className="bg-white rounded-md border border-slate-200 p-4 space-y-2">
             <h4 className="font-semibold text-slate-800">My Policy Acknowledgements ({acknowledgements.length})</h4>
             {acknowledgements.map((ack) => (
-              <div key={ack.id} className="p-3 border border-slate-100 rounded flex items-center justify-between gap-2">
+              <div key={ack.id} className="p-3 border border-slate-100 rounded flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <span className="font-semibold text-slate-800">{ack.policyVersion?.policy?.title || 'Company Policy'}</span>
                   <span className="ml-2 text-slate-500">v{ack.policyVersion?.versionNumber || '1.0'} • {ack.status}</span>
@@ -2543,19 +2618,19 @@ export default function GovernanceView({
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      onClick={() => onAcknowledgePolicy && onAcknowledgePolicy(ack.id)}
+                      onClick={async () => {
+                        onAcknowledgePolicy && (await onAcknowledgePolicy(ack.id));
+                        await loadGovernanceExtras();
+                      }}
                       className="px-3 py-1 bg-[#0088ff] text-white rounded text-[11px] font-medium"
                     >
                       Acknowledge
                     </button>
                     <button
                       type="button"
-                      onClick={async () => {
-                        await apiPost(`/api/v1/governance/policies/acknowledgements/${ack.id}/refuse`, {
-                          reason: 'Requires HR clarification on policy clause',
-                        });
-                        onShowToast && onShowToast('Refusal recorded for HR follow-up.');
-                        await loadGovernanceExtras();
+                      onClick={() => {
+                        setRefusalReasonText('Requires HR policy clause clarification before acknowledgement.');
+                        setRefusalPromptAck(ack);
                       }}
                       className="px-3 py-1 border border-rose-300 text-rose-700 rounded text-[11px]"
                     >
@@ -2567,7 +2642,79 @@ export default function GovernanceView({
             ))}
           </div>
 
+          {refusalPromptAck && (
+            <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4">
+              <div className="bg-white rounded-md shadow-xl border border-slate-200 w-full max-w-md p-5 space-y-3">
+                <div className="flex items-center justify-between border-b pb-2">
+                  <h4 className="font-semibold text-slate-800">Record Policy Query / Refusal Reason</h4>
+                  <button type="button" onClick={() => setRefusalPromptAck(null)}><X size={15} /></button>
+                </div>
+                <textarea
+                  rows={3}
+                  minLength={5}
+                  value={refusalReasonText}
+                  onChange={(e) => setRefusalReasonText(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded"
+                />
+                <div className="flex justify-end gap-2">
+                  <button type="button" onClick={() => setRefusalPromptAck(null)} className="px-3 py-1.5 border rounded">Cancel</button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await apiPost(`/api/v1/governance/policies/acknowledgements/${refusalPromptAck.id}/refuse`, {
+                          refusalReason: refusalReasonText.trim(),
+                        });
+                        setRefusalPromptAck(null);
+                        onShowToast && onShowToast('Refusal recorded for HR follow-up.');
+                        await loadGovernanceExtras();
+                      } catch (err) {
+                        onShowToast && onShowToast(err?.message || 'Failed to record refusal', 'error');
+                      }
+                    }}
+                    className="px-3.5 py-1.5 bg-rose-600 text-white rounded font-medium"
+                  >
+                    Submit Refusal
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {newVersionModal && (
+            <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4">
+              <div className="bg-white rounded-md shadow-xl border border-slate-200 w-full max-w-md p-5 space-y-3">
+                <div className="flex items-center justify-between border-b pb-2">
+                  <h4 className="font-semibold text-slate-800">Draft New Version — {newVersionModal.code}</h4>
+                  <button type="button" onClick={() => setNewVersionModal(null)}><X size={15} /></button>
+                </div>
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    try {
+                      await apiPost(`/api/v1/governance/policies/${newVersionModal.id}/versions`, newVersionForm);
+                      setNewVersionModal(null);
+                      onShowToast && onShowToast(`Draft v${newVersionForm.versionNumber} created.`);
+                      onRefreshAll && (await onRefreshAll());
+                    } catch (err) {
+                      onShowToast && onShowToast(err?.message || 'Failed to draft version', 'error');
+                    }
+                  }}
+                  className="space-y-2.5"
+                >
+                  <input required placeholder="Version (e.g. 2.0)" value={newVersionForm.versionNumber} onChange={(e) => setNewVersionForm({ ...newVersionForm, versionNumber: e.target.value })} className="w-full px-3 py-1.5 border rounded" />
+                  <textarea required minLength={5} rows={2} placeholder="Change summary" value={newVersionForm.contentSummary} onChange={(e) => setNewVersionForm({ ...newVersionForm, contentSummary: e.target.value })} className="w-full px-3 py-1.5 border rounded" />
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={() => setNewVersionModal(null)} className="px-3 py-1.5 border rounded">Cancel</button>
+                    <button type="submit" className="px-3.5 py-1.5 bg-[#0088ff] text-white rounded font-medium">Create Draft Version</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
           {/* Draft New Policy Form */}
+          {canManagePolicy && (
           <form
             onSubmit={async (e) => {
               e.preventDefault();
@@ -2595,6 +2742,7 @@ export default function GovernanceView({
             <input required placeholder="Initial Summary (>=5 chars)" value={newPolicyForm.initialVersionSummary} onChange={(e) => setNewPolicyForm({ ...newPolicyForm, initialVersionSummary: e.target.value })} className="md:col-span-2 px-3 py-2 border rounded" />
             <button type="submit" className="px-4 py-2 bg-[#0088ff] text-white rounded font-medium">Create Draft Policy</button>
           </form>
+          )}
         </div>
       )}
 
@@ -2603,44 +2751,66 @@ export default function GovernanceView({
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="bg-white rounded-md border border-slate-200 p-4 space-y-3">
             <h4 className="font-semibold text-slate-800">Training Programmes ({programmes.length})</h4>
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                await apiPost('/api/v1/governance/training/programmes', newProgForm);
-                setNewProgForm({ ...newProgForm, code: '', name: '' });
-                onShowToast && onShowToast('Training programme added.');
-                await loadGovernanceExtras();
-              }}
-              className="flex flex-wrap gap-2"
-            >
-              <input required placeholder="Code (TRN-01)" value={newProgForm.code} onChange={(e) => setNewProgForm({ ...newProgForm, code: e.target.value })} className="px-2.5 py-1.5 border rounded flex-1" />
-              <input required placeholder="Programme Name" value={newProgForm.name} onChange={(e) => setNewProgForm({ ...newProgForm, name: e.target.value })} className="px-2.5 py-1.5 border rounded flex-1" />
-              <button type="submit" className="px-3 py-1.5 bg-[#0088ff] text-white rounded font-medium">Add</button>
-            </form>
-            <div className="flex flex-wrap gap-2 pt-2 border-t">
-              <select value={assignProgId} onChange={(e) => setAssignProgId(e.target.value)} className="px-2.5 py-1.5 border rounded bg-white flex-1">
-                <option value="">Select Programme to Assign</option>
-                {programmes.map((pr) => <option key={pr.id} value={pr.id}>{pr.code} - {pr.name}</option>)}
-              </select>
-              <select value={assignEmpId} onChange={(e) => setAssignEmpId(e.target.value)} className="px-2.5 py-1.5 border rounded bg-white flex-1">
-                <option value="">Select Employee</option>
-                {employees.map((em) => <option key={em.id} value={em.id}>{em.firstName} {em.lastName}</option>)}
-              </select>
-              <button
-                type="button"
-                onClick={async () => {
-                  if (!assignProgId || !assignEmpId) return;
-                  await apiPost('/api/v1/governance/training/assign', { programmeId: assignProgId, employeeIds: [assignEmpId] });
-                  onShowToast && onShowToast('Training assigned.');
-                  onRefreshAll && (await onRefreshAll());
-                }}
-                className="px-3 py-1.5 bg-emerald-600 text-white rounded font-medium"
-              >
-                Assign Staff
-              </button>
-            </div>
+            {canManageTraining && (
+              <>
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    try {
+                      await apiPost('/api/v1/governance/training/programmes', newProgForm);
+                      setNewProgForm({ ...newProgForm, code: '', name: '' });
+                      onShowToast && onShowToast('Training programme added.');
+                      await loadGovernanceExtras();
+                    } catch (err) {
+                      onShowToast && onShowToast(err?.message || 'Failed to add training programme', 'error');
+                    }
+                  }}
+                  className="flex flex-wrap gap-2"
+                >
+                  <input required placeholder="Code (TRN-01)" value={newProgForm.code} onChange={(e) => setNewProgForm({ ...newProgForm, code: e.target.value })} className="px-2.5 py-1.5 border rounded flex-1" />
+                  <input required placeholder="Programme Name" value={newProgForm.name} onChange={(e) => setNewProgForm({ ...newProgForm, name: e.target.value })} className="px-2.5 py-1.5 border rounded flex-1" />
+                  <button type="submit" className="px-3 py-1.5 bg-[#0088ff] text-white rounded font-medium">Add</button>
+                </form>
+                <div className="flex flex-wrap gap-2 pt-2 border-t">
+                  <select value={assignProgId} onChange={(e) => setAssignProgId(e.target.value)} className="px-2.5 py-1.5 border rounded bg-white flex-1">
+                    <option value="">Select Programme to Assign</option>
+                    {programmes.map((pr) => <option key={pr.id} value={pr.id}>{pr.code} - {pr.name}</option>)}
+                  </select>
+                  <select value={assignEmpId} onChange={(e) => setAssignEmpId(e.target.value)} className="px-2.5 py-1.5 border rounded bg-white flex-1">
+                    <option value="">Select Employee</option>
+                    {employees.map((em) => <option key={em.id} value={em.id}>{em.firstName} {em.lastName}</option>)}
+                  </select>
+                  <input type="date" value={assignDueDate} onChange={(e) => setAssignDueDate(e.target.value)} className="px-2 py-1.5 border rounded bg-white" />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!assignProgId || !assignEmpId) {
+                        onShowToast && onShowToast('Select both a training programme and an employee.', 'error');
+                        return;
+                      }
+                      try {
+                        await apiPost('/api/v1/governance/training/assign', {
+                          programmeId: assignProgId,
+                          employeeId: assignEmpId,
+                          dueDate: assignDueDate || '2026-12-15',
+                        });
+                        onShowToast && onShowToast('Training assigned.');
+                        onRefreshAll && (await onRefreshAll());
+                      } catch (err) {
+                        onShowToast && onShowToast(err?.message || 'Failed to assign training', 'error');
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-emerald-600 text-white rounded font-medium"
+                  >
+                    Assign Staff
+                  </button>
+                </div>
+              </>
+            )}
             <div className="divide-y divide-slate-100">
-              {trainings.map((tr) => (
+              {trainings.length === 0 ? (
+                <p className="text-slate-400 py-3">No training assignments assigned to your profile yet.</p>
+              ) : trainings.map((tr) => (
                 <div key={tr.id} className="py-2 flex items-center justify-between">
                   <div>
                     <div className="font-medium text-slate-800">{tr.programme?.name || 'Training'}</div>
@@ -2649,7 +2819,15 @@ export default function GovernanceView({
                   {tr.status !== 'COMPLETED' && (
                     <button
                       type="button"
-                      onClick={() => onAcknowledgePolicy && onShowToast && apiPost(`/api/v1/governance/training/assignments/${tr.id}/complete`, { scorePct: 100 }).then(() => { onShowToast('Training completed.'); onRefreshAll && onRefreshAll(); })}
+                      onClick={async () => {
+                        try {
+                          await apiPost(`/api/v1/governance/training/assignments/${tr.id}/complete`, { scorePercent: 100, passed: true });
+                          onShowToast && onShowToast('Training completed.');
+                          onRefreshAll && (await onRefreshAll());
+                        } catch (err) {
+                          onShowToast && onShowToast(err?.message || 'Completion failed', 'error');
+                        }
+                      }}
                       className="px-2.5 py-1 bg-[#0088ff] text-white rounded text-[11px]"
                     >
                       Mark Complete
@@ -2662,19 +2840,25 @@ export default function GovernanceView({
 
           <div className="bg-white rounded-md border border-slate-200 p-4 space-y-3">
             <h4 className="font-semibold text-slate-800">Security Comms ({securityComms.length}) & Phishing Records ({phishingRecords.length})</h4>
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                await apiPost('/api/v1/governance/training/security-comms', newCommForm);
-                setNewCommForm({ ...newCommForm, subject: '', reference: '' });
-                onShowToast && onShowToast('Security communication logged.');
-                await loadGovernanceExtras();
-              }}
-              className="flex gap-2"
-            >
-              <input required placeholder="Security bulletin subject..." value={newCommForm.subject} onChange={(e) => setNewCommForm({ ...newCommForm, subject: e.target.value })} className="px-2.5 py-1.5 border rounded flex-1" />
-              <button type="submit" className="px-3 py-1.5 bg-[#0088ff] text-white rounded font-medium">Log Bulletin</button>
-            </form>
+            {canManageTraining && (
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  try {
+                    await apiPost('/api/v1/governance/training/security-comms', newCommForm);
+                    setNewCommForm({ ...newCommForm, subject: '', reference: '' });
+                    onShowToast && onShowToast('Security communication logged.');
+                    await loadGovernanceExtras();
+                  } catch (err) {
+                    onShowToast && onShowToast(err?.message || 'Failed to log bulletin', 'error');
+                  }
+                }}
+                className="flex gap-2"
+              >
+                <input required placeholder="Security bulletin subject..." value={newCommForm.subject} onChange={(e) => setNewCommForm({ ...newCommForm, subject: e.target.value })} className="px-2.5 py-1.5 border rounded flex-1" />
+                <button type="submit" className="px-3 py-1.5 bg-[#0088ff] text-white rounded font-medium">Log Bulletin</button>
+              </form>
+            )}
             <div className="divide-y divide-slate-100 max-h-48 overflow-y-auto">
               {securityComms.map((sc) => (
                 <div key={sc.id} className="py-2">
@@ -2692,35 +2876,50 @@ export default function GovernanceView({
         <div className="bg-white rounded-md border border-slate-200 p-4 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h4 className="font-semibold text-slate-800">Secure Document Vault ({vaultDocs.length})</h4>
-            <label className="px-3 py-1.5 bg-[#0088ff] text-white rounded font-medium cursor-pointer">
-              Upload Document
-              <input
-                type="file"
-                className="hidden"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  const reader = new FileReader();
-                  reader.onload = async () => {
-                    const b64 = String(reader.result).split(',')[1] || '';
-                    try {
-                      await apiPost('/api/v1/documents/upload', {
-                        fileName: file.name,
-                        mimeType: file.type || 'application/octet-stream',
-                        category: newDocForm.category,
-                        securityClassification: newDocForm.securityClassification,
-                        fileBase64: b64,
-                      });
-                      onShowToast && onShowToast(`Uploaded ${file.name}.`);
-                      await loadGovernanceExtras();
-                    } catch (err) {
-                      onShowToast && onShowToast(err?.message || 'Upload rejected', 'error');
-                    }
-                  };
-                  reader.readAsDataURL(file);
-                }}
-              />
-            </label>
+            {canUploadDocs && (
+              <div className="flex flex-wrap items-center gap-2">
+                <select value={newDocForm.category} onChange={(e) => setNewDocForm({ ...newDocForm, category: e.target.value })} className="px-2.5 py-1.5 border rounded bg-white">
+                  <option value="POLICY">Policy</option>
+                  <option value="COMPLIANCE">Compliance</option>
+                  <option value="ORGANISATION">Organisation</option>
+                </select>
+                <select value={newDocForm.securityClassification} onChange={(e) => setNewDocForm({ ...newDocForm, securityClassification: e.target.value })} className="px-2.5 py-1.5 border rounded bg-white">
+                  <option value="INTERNAL">INTERNAL</option>
+                  <option value="CONFIDENTIAL">CONFIDENTIAL</option>
+                  <option value="RESTRICTED">RESTRICTED</option>
+                  <option value="PUBLIC">PUBLIC</option>
+                </select>
+                <label className="px-3 py-1.5 bg-[#0088ff] text-white rounded font-medium cursor-pointer">
+                  Upload Document
+                  <input
+                    type="file"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = async () => {
+                        const b64 = String(reader.result).split(',')[1] || '';
+                        try {
+                          await apiPost('/api/v1/documents/upload', {
+                            fileName: file.name,
+                            mimeType: file.type || 'application/octet-stream',
+                            category: newDocForm.category,
+                            securityClassification: newDocForm.securityClassification,
+                            fileBase64: b64,
+                          });
+                          onShowToast && onShowToast(`Uploaded ${file.name}.`);
+                          await loadGovernanceExtras();
+                        } catch (err) {
+                          onShowToast && onShowToast(err?.message || 'Upload rejected', 'error');
+                        }
+                      };
+                      reader.readAsDataURL(file);
+                    }}
+                  />
+                </label>
+              </div>
+            )}
           </div>
           <table className="w-full text-left border-collapse">
             <thead className="bg-slate-50 border-b text-slate-600">
@@ -2738,18 +2937,27 @@ export default function GovernanceView({
                   <td className="py-2 px-3 font-medium text-slate-800">{d.fileName}</td>
                   <td className="py-2 px-3">{d.category}</td>
                   <td className="py-2 px-3">{d.securityClassification}</td>
-                  <td className="py-2 px-3">{Math.round((d.fileSizeBytes || 0) / 1024)} KB</td>
+                  <td className="py-2 px-3">{Math.max(1, Math.round((d.fileSizeBytes || 0) / 1024))} KB</td>
                   <td className="py-2 px-3 text-right">
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const tok = await apiGet(`/api/v1/documents/${d.id}/download-token`);
-                        await apiDownload(tok.downloadUrl || `/api/v1/documents/${d.id}/download?token=${tok.token}`, d.fileName);
-                      }}
-                      className="text-[#0088ff] font-medium hover:underline"
-                    >
-                      Signed Download
-                    </button>
+                    {canDownloadDocs ? (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const tok = await apiPost(`/api/v1/documents/${d.id}/token`, {});
+                            await apiDownload(tok.downloadUrl || `/api/v1/documents/download?token=${tok.downloadToken}`, d.fileName);
+                            onShowToast && onShowToast(`Downloaded ${d.fileName} via signed token.`);
+                          } catch (err) {
+                            onShowToast && onShowToast(err?.message || 'Download failed', 'error');
+                          }
+                        }}
+                        className="text-[#0088ff] font-medium hover:underline"
+                      >
+                        Signed Download
+                      </button>
+                    ) : (
+                      <span className="text-slate-400">View Only</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -2761,11 +2969,16 @@ export default function GovernanceView({
       {/* ER Cases Vault Tab */}
       {govSubTab === 'er' && (
         <div className="bg-white rounded-md border border-slate-200 p-4 space-y-4">
+          {canIntakeEr && (
           <form
             onSubmit={async (e) => {
               e.preventDefault();
               try {
-                await apiPost('/api/v1/er/cases', newErForm);
+                const handlerId = newErForm.primaryHandlerId || (canHandleEr ? currentUser?.id : undefined);
+                await apiPost('/api/v1/er/cases', {
+                  ...newErForm,
+                  ...(handlerId ? { primaryHandlerId: handlerId } : {}),
+                });
                 setNewErForm({ ...newErForm, title: '', allegationSummary: '' });
                 onShowToast && onShowToast('ER Case registered.');
                 onRefreshAll && (await onRefreshAll());
@@ -2773,71 +2986,121 @@ export default function GovernanceView({
                 onShowToast && onShowToast(err?.message || 'ER Intake failed', 'error');
               }
             }}
-            className="grid grid-cols-1 md:grid-cols-3 gap-2 pb-4 border-b"
+            className="grid grid-cols-1 md:grid-cols-4 gap-2 pb-4 border-b"
           >
             <select value={newErForm.caseType} onChange={(e) => setNewErForm({ ...newErForm, caseType: e.target.value })} className="px-2.5 py-1.5 border rounded bg-white">
               <option value="GRIEVANCE">Grievance</option>
               <option value="DISCIPLINARY">Disciplinary</option>
               <option value="HARASSMENT_DISCRIMINATION">Harassment / Discrimination</option>
             </select>
-            <input required placeholder="Case Title" value={newErForm.title} onChange={(e) => setNewErForm({ ...newErForm, title: e.target.value })} className="px-2.5 py-1.5 border rounded" />
+            <input required minLength={5} placeholder="Case Title (>=5 chars)" value={newErForm.title} onChange={(e) => setNewErForm({ ...newErForm, title: e.target.value })} className="px-2.5 py-1.5 border rounded" />
             <select value={newErForm.severity} onChange={(e) => setNewErForm({ ...newErForm, severity: e.target.value })} className="px-2.5 py-1.5 border rounded bg-white">
               <option value="STANDARD">Standard</option>
               <option value="HIGH">High</option>
               <option value="CRITICAL">Critical</option>
             </select>
-            <input required placeholder="Summary (>=10 chars)" value={newErForm.allegationSummary} onChange={(e) => setNewErForm({ ...newErForm, allegationSummary: e.target.value })} className="md:col-span-2 px-2.5 py-1.5 border rounded" />
+            <select value={newErForm.primaryHandlerId} onChange={(e) => setNewErForm({ ...newErForm, primaryHandlerId: e.target.value })} className="px-2.5 py-1.5 border rounded bg-white">
+              <option value="">{canHandleEr ? `Assign Handler: Me (${currentUser?.name || currentUser?.email})` : 'Default Unassigned Handler'}</option>
+              {employees.filter((em) => em.userId).map((em) => (
+                <option key={em.userId} value={em.userId}>Handler: {em.firstName} {em.lastName}</option>
+              ))}
+            </select>
+            <input required minLength={10} placeholder="Summary (>=10 chars)" value={newErForm.allegationSummary} onChange={(e) => setNewErForm({ ...newErForm, allegationSummary: e.target.value })} className="md:col-span-3 px-2.5 py-1.5 border rounded" />
             <button type="submit" className="px-3 py-1.5 bg-[#0088ff] text-white rounded font-medium">Open ER Case</button>
           </form>
+          )}
 
+          {erCases.length === 0 ? (
+            <NdakalaEmptyState title="No ER Cases Visible" subtitle="Only cases explicitly assigned to your role or executive oversight are listed here (case-level isolation enforced)." />
+          ) : (
           <div className="divide-y divide-slate-100">
-            {erCases.map((c) => (
+            {erCases.map((c) => {
+              const pendingAppeal = (c.appeals || []).find((a) => a.status === 'PENDING') || c.appeals?.[0];
+              return (
               <div key={c.id} className="py-3 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <span className="font-mono font-bold mr-2">{c.caseNumber}</span>
                   <span className="font-semibold text-slate-800">{c.title}</span>
                   <span className="ml-2 px-2 py-0.5 bg-blue-50 text-[#0088ff] rounded text-[10px] font-bold">{c.status}</span>
+                  {c.isAnonymous && <span className="ml-1 px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-[10px] font-semibold">ANONYMOUS</span>}
                   <p className="text-slate-500 mt-0.5">{c.allegationSummary}</p>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   <button
                     type="button"
-                    onClick={() => setErModal({ mode: 'conflict', caseItem: c })}
-                    className="px-2.5 py-1 border border-amber-300 text-amber-700 rounded hover:bg-amber-50 text-[11px]"
-                  >
-                    Conflict
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setErModal({ mode: 'hearing', caseItem: c })}
-                    className="px-2.5 py-1 border border-blue-300 text-[#0088ff] rounded hover:bg-blue-50 text-[11px]"
-                  >
-                    Hearing
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setErModal({ mode: 'appeal', caseItem: c })}
-                    className="px-2.5 py-1 border border-purple-300 text-purple-700 rounded hover:bg-purple-50 text-[11px]"
-                  >
-                    Submit Appeal
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setErModalForm((f) => ({ ...f, appealId: c.appeals?.[0]?.id || '' }));
-                      setErModal({ mode: 'review_appeal', caseItem: c });
+                    onClick={async () => {
+                      try {
+                        const detail = await apiGet(`/api/v1/er/cases/${c.id}`);
+                        setInspectedErCase(detail);
+                      } catch (err) {
+                        onShowToast && onShowToast(err?.message || 'Access denied', 'error');
+                      }
                     }}
-                    className="px-2.5 py-1 border border-emerald-300 text-emerald-700 rounded hover:bg-emerald-50 text-[11px]"
+                    className="px-2.5 py-1 border border-slate-300 text-slate-700 rounded hover:bg-slate-50 text-[11px]"
                   >
-                    Review Appeal
+                    Inspect
                   </button>
+                  {canHandleEr && c.status !== 'CLOSED' && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setErModal({ mode: 'conflict', caseItem: c })}
+                        className="px-2.5 py-1 border border-amber-300 text-amber-700 rounded hover:bg-amber-50 text-[11px]"
+                      >
+                        Conflict
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setErModal({ mode: 'hearing', caseItem: c })}
+                        className="px-2.5 py-1 border border-blue-300 text-[#0088ff] rounded hover:bg-blue-50 text-[11px]"
+                      >
+                        Hearing
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setErModal({ mode: 'decision', caseItem: c })}
+                        className="px-2.5 py-1 border border-indigo-300 text-indigo-700 rounded hover:bg-indigo-50 text-[11px]"
+                      >
+                        Issue Decision
+                      </button>
+                    </>
+                  )}
                   {c.status !== 'CLOSED' && (
                     <button
                       type="button"
+                      onClick={() => {
+                        const defaultOfficer = employees.find((e) => e.userId && e.employeeNumber === 'SEED-0000')?.userId || currentUser?.id || '';
+                        setErModalForm((f) => ({ ...f, appealOfficerId: defaultOfficer }));
+                        setErModal({ mode: 'appeal', caseItem: c });
+                      }}
+                      className="px-2.5 py-1 border border-purple-300 text-purple-700 rounded hover:bg-purple-50 text-[11px]"
+                    >
+                      Submit Appeal
+                    </button>
+                  )}
+                  {canAppealEr && pendingAppeal && c.status !== 'CLOSED' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setErModalForm((f) => ({ ...f, appealId: pendingAppeal.id }));
+                        setErModal({ mode: 'review_appeal', caseItem: c });
+                      }}
+                      className="px-2.5 py-1 border border-emerald-300 text-emerald-700 rounded hover:bg-emerald-50 text-[11px]"
+                    >
+                      Review Appeal
+                    </button>
+                  )}
+                  {canHandleEr && c.status !== 'CLOSED' && (
+                    <button
+                      type="button"
                       onClick={async () => {
-                        await apiPost(`/api/v1/er/cases/${c.id}/close`, { outcomeNotes: 'Closed after formal human review' });
-                        onShowToast && onShowToast(`Case ${c.caseNumber} closed.`);
-                        onRefreshAll && (await onRefreshAll());
+                        try {
+                          await apiPost(`/api/v1/er/cases/${c.id}/close`, { outcomeNotes: 'Closed after formal human review' });
+                          onShowToast && onShowToast(`Case ${c.caseNumber} closed.`);
+                          onRefreshAll && (await onRefreshAll());
+                        } catch (err) {
+                          onShowToast && onShowToast(err?.message || 'Close failed', 'error');
+                        }
                       }}
                       className="px-3 py-1 border border-slate-300 rounded hover:bg-slate-50 text-[11px]"
                     >
@@ -2846,8 +3109,31 @@ export default function GovernanceView({
                   )}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
+          )}
+
+          {inspectedErCase && (
+            <div className="p-4 bg-slate-50 rounded border border-slate-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <h5 className="font-semibold text-slate-800">Case Audit File: {inspectedErCase.caseNumber} ({inspectedErCase.status})</h5>
+                <button type="button" onClick={() => setInspectedErCase(null)} className="text-slate-500 hover:text-slate-800">Close</button>
+              </div>
+              <div className="text-[11px] text-slate-600">
+                Hearings: {inspectedErCase.hearings?.length || 0} • Decisions: {inspectedErCase.decisions?.length || 0} • Appeals: {inspectedErCase.appeals?.length || 0} • Events: {inspectedErCase.events?.length || 0}
+              </div>
+              {(inspectedErCase.events || []).length > 0 && (
+                <div className="space-y-1">
+                  {inspectedErCase.events.map((ev) => (
+                    <div key={ev.id} className="text-[11px] bg-white px-2.5 py-1 rounded border border-slate-100">
+                      <span className="font-mono font-semibold">{ev.eventType}</span> — {ev.description}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -2860,6 +3146,8 @@ export default function GovernanceView({
                   ? `Declare Conflict — ${erModal.caseItem.caseNumber}`
                   : erModal.mode === 'hearing'
                   ? `Schedule Hearing — ${erModal.caseItem.caseNumber}`
+                  : erModal.mode === 'decision'
+                  ? `Issue Decision — ${erModal.caseItem.caseNumber}`
                   : erModal.mode === 'appeal'
                   ? `Submit Appeal — ${erModal.caseItem.caseNumber}`
                   : `Review Appeal — ${erModal.caseItem.caseNumber}`}
@@ -2882,10 +3170,16 @@ export default function GovernanceView({
                       companionAllowed: true,
                     });
                     onShowToast && onShowToast(`Hearing scheduled for ${cnum}.`);
+                  } else if (erModal.mode === 'decision') {
+                    await apiPost(`/api/v1/er/cases/${cid}/decision`, {
+                      findings: erModalForm.findings,
+                      sanction: erModalForm.sanction,
+                    });
+                    onShowToast && onShowToast(`Formal decision recorded for ${cnum}.`);
                   } else if (erModal.mode === 'appeal') {
                     await apiPost(`/api/v1/er/cases/${cid}/appeal`, {
                       grounds: erModalForm.grounds,
-                      appealOfficerId: currentUser?.id || employees[0]?.userId || '',
+                      appealOfficerId: erModalForm.appealOfficerId || currentUser?.id || '',
                     });
                     onShowToast && onShowToast(`Appeal submitted for ${cnum}.`);
                   } else if (erModal.mode === 'review_appeal') {
@@ -2939,18 +3233,63 @@ export default function GovernanceView({
                   </div>
                 </>
               )}
+              {erModal.mode === 'decision' && (
+                <>
+                  <div>
+                    <label className="block text-slate-600 font-medium mb-1">Findings (min 5 characters)</label>
+                    <textarea
+                      required
+                      minLength={5}
+                      rows={3}
+                      value={erModalForm.findings}
+                      onChange={(e) => setErModalForm({ ...erModalForm, findings: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-300 rounded"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-600 font-medium mb-1">Determination / Sanction</label>
+                    <select
+                      value={erModalForm.sanction}
+                      onChange={(e) => setErModalForm({ ...erModalForm, sanction: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-300 rounded bg-white"
+                    >
+                      <option value="NO_SANCTION">No Sanction / Resolved</option>
+                      <option value="VERBAL_CAUTION">Verbal Caution</option>
+                      <option value="WRITTEN_WARNING">Written Warning</option>
+                      <option value="FINAL_WRITTEN_WARNING">Final Written Warning</option>
+                    </select>
+                  </div>
+                </>
+              )}
               {erModal.mode === 'appeal' && (
-                <div>
-                  <label className="block text-slate-600 font-medium mb-1">Appeal Grounds (min 10 characters)</label>
-                  <textarea
-                    required
-                    minLength={10}
-                    rows={3}
-                    value={erModalForm.grounds}
-                    onChange={(e) => setErModalForm({ ...erModalForm, grounds: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded"
-                  />
-                </div>
+                <>
+                  <div>
+                    <label className="block text-slate-600 font-medium mb-1">Appeal Officer</label>
+                    <select
+                      required
+                      value={erModalForm.appealOfficerId}
+                      onChange={(e) => setErModalForm({ ...erModalForm, appealOfficerId: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-300 rounded bg-white"
+                    >
+                      <option value="">Select Appeal Officer</option>
+                      {employees.filter((e) => e.userId).map((e) => (
+                        <option key={e.userId} value={e.userId}>{e.firstName} {e.lastName} ({e.employeeNumber})</option>
+                      ))}
+                      {currentUser?.id && <option value={currentUser.id}>Current User ({currentUser.name || currentUser.email})</option>}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-slate-600 font-medium mb-1">Appeal Grounds (min 10 characters)</label>
+                    <textarea
+                      required
+                      minLength={10}
+                      rows={3}
+                      value={erModalForm.grounds}
+                      onChange={(e) => setErModalForm({ ...erModalForm, grounds: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-300 rounded"
+                    />
+                  </div>
+                </>
               )}
               {erModal.mode === 'review_appeal' && (
                 <>
