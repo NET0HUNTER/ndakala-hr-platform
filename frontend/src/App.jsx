@@ -109,7 +109,7 @@ export default function App() {
       timetracker: 'mydata',
       attendance: 'mydata',
       performance: 'gettingstarted',
-      okr: 'appraisals',
+      okr: 'configuration',
       payroll: 'compensation',
       hrletters: 'addressproof',
       admin: 'files',

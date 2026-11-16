@@ -14,6 +14,10 @@ import {
   Edit,
   Search,
   RefreshCw,
+  ArrowLeft,
+  MoreHorizontal,
+  Bell,
+  Settings,
 } from '../components/Icons';
 import { apiGet, apiPost, apiDownload, unwrapList } from '../utils/api';
 import InlineDocumentViewerModal from './modals/InlineDocumentViewerModal';
@@ -43,11 +47,11 @@ export default function FilesView({
     userRoles.has('head_of_hr') ||
     userRoles.has('operations_director');
 
-  // Navigation State: End-User ("shared_with_me" / "shared_with_role") vs Manage ("org" | "employee" | "templates")
-  const [navMode, setNavMode] = useState(canManageFiles ? 'manage' : 'shared_with_me'); // shared_with_me | shared_with_role | manage
-  const [manageTab, setManageTab] = useState('org'); // org | employee | templates
-
-  const activeScopeTab = navMode === 'manage' ? manageTab : navMode;
+  // Navigation State matching Zoho People Files tabs:
+  // 'org' (Organization Files) | 'employee' (Employee Files) | 'templates' (HR Forms & Templates) | 'shared_with_me' | 'shared_with_role'
+  const [navMode, setNavMode] = useState('org');
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const activeScopeTab = navMode;
 
   const [files, setFiles] = useState([]);
   const [folders, setFolders] = useState([]);
@@ -350,72 +354,129 @@ export default function FilesView({
 
   return (
     <div className="flex flex-col h-full bg-[#edf1f7] overflow-hidden text-xs">
-      {/* Zoho-Style Sub-Header Bar */}
-      <div className="bg-[#1b2242] text-white px-5 h-11 flex items-center justify-between flex-shrink-0 border-b border-white/10">
-        <div className="flex items-center space-x-5 h-full">
-          {/* Primary Scope Selector */}
-          <div className="flex items-center space-x-1 bg-white/10 rounded p-0.5">
-            <button
-              type="button"
-              onClick={() => setNavMode('shared_with_me')}
-              className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
-                navMode === 'shared_with_me' ? 'bg-[#0088ff] text-white' : 'text-blue-100 hover:text-white'
-              }`}
-            >
-              Shared with Me
-            </button>
-            <button
-              type="button"
-              onClick={() => setNavMode('shared_with_role')}
-              className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
-                navMode === 'shared_with_role' ? 'bg-[#0088ff] text-white' : 'text-blue-100 hover:text-white'
-              }`}
-            >
-              Shared with My Role
-            </button>
-            {canManageFiles && (
+      {/* Zoho-Style Sub-Header Bar (Matches Uploaded Reference Exactly) */}
+      <div className="bg-[#18223c] text-white px-4 h-12 flex items-center justify-between flex-shrink-0 border-b border-white/10">
+        <div className="flex items-center space-x-6 h-full">
+          {/* Files Back Button */}
+          <button
+            type="button"
+            onClick={() => setNavMode('org')}
+            className="bg-[#0088ff] hover:bg-blue-600 text-white px-3 py-1.5 rounded flex items-center gap-1.5 font-semibold text-xs transition-colors shadow-sm"
+          >
+            <ArrowLeft size={14} className="stroke-[2.5]" />
+            <span>Files</span>
+          </button>
+
+          {/* Primary Zoho Tabs */}
+          <div className="flex items-center space-x-6 h-full">
+            {[
+              { id: 'org', label: 'Organization Files' },
+              { id: 'employee', label: 'Employee Files' },
+              { id: 'templates', label: 'HR Forms & Templates' },
+            ].map((t) => {
+              const selected = activeScopeTab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setNavMode(t.id)}
+                  className={`relative h-full flex items-center text-[13px] font-medium transition-colors ${
+                    selected ? 'text-white font-semibold' : 'text-[#a3aed0] hover:text-white'
+                  }`}
+                >
+                  <span>{t.label}</span>
+                  {selected && (
+                    <span className="absolute bottom-0 left-0 right-0 h-[3px] bg-[#0088ff] rounded-t" />
+                  )}
+                </button>
+              );
+            })}
+
+            {/* More '...' dropdown menu */}
+            <div className="relative h-full flex items-center">
               <button
                 type="button"
-                onClick={() => setNavMode('manage')}
-                className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
-                  navMode === 'manage' ? 'bg-[#0088ff] text-white' : 'text-blue-100 hover:text-white'
+                onClick={() => setMoreMenuOpen(!moreMenuOpen)}
+                className={`relative h-full flex items-center px-1 text-[13px] font-medium transition-colors ${
+                  activeScopeTab === 'shared_with_me' || activeScopeTab === 'shared_with_role'
+                    ? 'text-white font-semibold'
+                    : 'text-[#a3aed0] hover:text-white'
                 }`}
+                title="More views"
               >
-                Manage
+                <MoreHorizontal size={16} />
+                {(activeScopeTab === 'shared_with_me' || activeScopeTab === 'shared_with_role') && (
+                  <span className="absolute bottom-0 left-0 right-0 h-[3px] bg-[#0088ff] rounded-t" />
+                )}
               </button>
-            )}
-          </div>
-
-          {/* Manage Mode Tabs matching Zoho Screenshot: Organization Files | Employee Files | HR Forms & Templates */}
-          {navMode === 'manage' && (
-            <div className="flex items-center space-x-5 h-full pl-2">
-              {[
-                { id: 'org', label: 'Organization Files' },
-                { id: 'employee', label: 'Employee Files' },
-                { id: 'templates', label: 'HR Forms & Templates' },
-              ].map((t) => {
-                const selected = manageTab === t.id;
-                return (
+              {moreMenuOpen && (
+                <div className="absolute top-11 left-0 w-48 bg-white text-slate-800 rounded-md shadow-lg border border-slate-200 py-1.5 z-50">
                   <button
-                    key={t.id}
                     type="button"
-                    onClick={() => setManageTab(t.id)}
-                    className={`relative h-full flex items-center text-[13px] font-medium transition-colors ${
-                      selected ? 'text-white font-semibold' : 'text-[#a3aed0] hover:text-white'
+                    onClick={() => {
+                      setNavMode('shared_with_me');
+                      setMoreMenuOpen(false);
+                    }}
+                    className={`w-full text-left px-3.5 py-2 text-xs hover:bg-slate-50 flex items-center justify-between ${
+                      activeScopeTab === 'shared_with_me' ? 'text-[#0088ff] font-semibold bg-blue-50/50' : 'text-slate-700'
                     }`}
                   >
-                    <span>{t.label}</span>
-                    {selected && <span className="absolute bottom-0 left-0 right-0 h-[3px] bg-[#0088ff] rounded-t" />}
+                    <span>Shared with Me</span>
+                    {activeScopeTab === 'shared_with_me' && <Check size={13} className="text-[#0088ff]" />}
                   </button>
-                );
-              })}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNavMode('shared_with_role');
+                      setMoreMenuOpen(false);
+                    }}
+                    className={`w-full text-left px-3.5 py-2 text-xs hover:bg-slate-50 flex items-center justify-between ${
+                      activeScopeTab === 'shared_with_role' ? 'text-[#0088ff] font-semibold bg-blue-50/50' : 'text-slate-700'
+                    }`}
+                  >
+                    <span>Shared with My Role</span>
+                    {activeScopeTab === 'shared_with_role' && <Check size={13} className="text-[#0088ff]" />}
+                  </button>
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 text-[11px] text-blue-200">
-          <Lock size={12} className="text-emerald-400" />
-          <span>AES-256 Vault + App-Only SharePoint Proxy</span>
+        {/* Header Right Action Icons */}
+        <div className="flex items-center space-x-3">
+          <button
+            type="button"
+            onClick={() => {
+              setUploadForm((prev) => ({
+                ...prev,
+                category: activeScopeTab === 'employee' ? 'EMPLOYEE' : 'ORGANISATION',
+                shareScope: activeScopeTab === 'employee' ? 'EMPLOYEE' : 'ORG',
+              }));
+              setAddFileModalOpen(true);
+            }}
+            className="w-7 h-7 bg-[#0088ff] hover:bg-blue-600 text-white rounded flex items-center justify-center transition-colors shadow-sm"
+            title="Add File"
+          >
+            <Plus size={15} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setFilterDrawerOpen(true)}
+            className="p-1.5 text-[#a3aed0] hover:text-white transition-colors"
+            title="Search / Filter"
+          >
+            <Search size={15} />
+          </button>
+          <div className="p-1.5 text-[#a3aed0] hover:text-white transition-colors cursor-pointer" title="Notifications">
+            <Bell size={15} />
+          </div>
+          <div className="p-1.5 text-[#a3aed0] hover:text-white transition-colors cursor-pointer" title="Settings">
+            <Settings size={15} />
+          </div>
+          <div className="w-7 h-7 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-xs uppercase border border-white/20">
+            {currentUser?.name ? currentUser.name.charAt(0) : 'U'}
+          </div>
         </div>
       </div>
 
@@ -555,65 +616,57 @@ export default function FilesView({
           </div>
         )}
 
-        {/* TAB: HR FORMS & TEMPLATES (Matches Uploaded Screenshot) */}
+        {/* TAB: HR FORMS & TEMPLATES (Matches Uploaded Screenshot Exactly) */}
         {activeScopeTab === 'templates' && (
-          <div className="bg-white rounded-md border border-slate-200 overflow-hidden shadow-sm">
-            <div className="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
-              <div>
-                <h4 className="font-semibold text-sm text-slate-800">HR Forms & Templates</h4>
-                <p className="text-slate-500 mt-0.5">
-                  Native React HR forms compiled securely into backend PDFs and dual-written to SharePoint & AES-256 vault
-                </p>
-              </div>
-              <span className="px-2.5 py-1 bg-blue-50 text-[#0088ff] rounded font-semibold text-[11px]">
-                Word Online Editing Disabled (Zero-Trust Audit Mode)
-              </span>
-            </div>
+          <div className="bg-white rounded border border-slate-200 overflow-hidden shadow-sm">
             <table className="w-full text-left border-collapse">
-              <thead className="bg-[#e8edf5] border-b border-slate-200 text-slate-700 font-semibold">
+              <thead className="bg-[#f4f7fa] border-b border-slate-200 text-slate-600 font-semibold text-xs">
                 <tr>
-                  <th className="py-3 px-4 w-10">
-                    <input type="checkbox" disabled className="rounded border-slate-300" />
+                  <th className="py-3 px-4 w-12 text-center">
+                    <input type="checkbox" className="rounded border-slate-300 w-4 h-4 text-[#0088ff] focus:ring-0" />
                   </th>
-                  <th className="py-3 px-4">Name</th>
+                  <th className="py-3 px-4 w-1/3">Name</th>
                   <th className="py-3 px-4">Description</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
+                  <th className="py-3 px-4 w-28 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {templates.map((tpl) => (
-                  <tr key={tpl.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="py-3.5 px-4">
-                      <input type="checkbox" className="rounded border-slate-300" />
+                  <tr key={tpl.id} className="hover:bg-slate-50/80 transition-colors group">
+                    <td className="py-3.5 px-4 text-center">
+                      <input type="checkbox" className="rounded border-slate-300 w-4 h-4 text-[#0088ff] focus:ring-0" />
                     </td>
                     <td className="py-3.5 px-4">
-                      <div className="flex items-start gap-2.5">
-                        <div className="p-2 rounded bg-blue-50 text-[#0088ff] mt-0.5">
-                          <FileText size={16} />
+                      <div className="flex items-start gap-3">
+                        <div className="p-1 text-[#0088ff] mt-0.5 flex-shrink-0">
+                          <FileText size={18} />
                         </div>
                         <div>
                           <button
                             type="button"
                             onClick={() => handleOpenTemplateForm(tpl)}
-                            className="font-semibold text-slate-800 hover:text-[#0088ff] text-left"
+                            className="font-medium text-sm text-slate-800 hover:text-[#0088ff] text-left transition-colors"
                           >
                             {tpl.name}
                           </button>
-                          <p className="text-[11px] text-slate-400">
+                          <p className="text-[11px] text-slate-400 mt-0.5">
                             Created on {formatDateNice(tpl.createdAt)}
                           </p>
                         </div>
                       </div>
                     </td>
-                    <td className="py-3.5 px-4 text-slate-600 max-w-xl leading-relaxed">{tpl.description}</td>
+                    <td className="py-3.5 px-4 text-xs text-slate-600 leading-relaxed">{tpl.description}</td>
                     <td className="py-3.5 px-4 text-right">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenTemplateForm(tpl)}
-                        className="px-3 py-1.5 bg-[#0088ff] hover:bg-blue-600 text-white rounded font-medium inline-flex items-center gap-1.5"
-                      >
-                        <Edit size={12} /> Fill Form & Compile PDF
-                      </button>
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenTemplateForm(tpl)}
+                          className="px-2.5 py-1 text-xs text-[#0088ff] hover:bg-blue-50 rounded font-medium inline-flex items-center gap-1 transition-colors"
+                          title="Fill form and compile"
+                        >
+                          <Edit size={12} /> Fill
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

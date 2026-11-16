@@ -366,7 +366,7 @@ export function LoginView({
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
-      setFieldError('Enter a valid email address (e.g. name@ndakalaadvisory.co.ke).');
+      setFieldError('Enter a valid email address (e.g. name@company.com).');
       return;
     }
     updateEmail(trimmed);

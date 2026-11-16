@@ -10,9 +10,11 @@ import {
   Trophy,
   Target,
   Award,
+  Sliders,
   NdakalaEmptyState,
 } from '../components/Icons';
 import { apiGet, apiPost, apiPut, apiPatch, unwrapList } from '../utils/api';
+import OkrConfigurationView from './OkrConfigurationView';
 
 const PERF_SETTINGS_TABS = [
   { id: 'methods', label: 'Performance Methods' },
@@ -451,6 +453,20 @@ export default function PerformanceView({
 
   const myDisplayName = currentUser?.fullName || currentUser?.name || currentUser?.email || 'My Profile';
 
+  // ==================== OKR CONFIGURATION & GOVERNANCE VIEW ====================
+  if (topContextTab === 'configuration' || subViewHint === 'configuration' || (activeTab === 'okr' && opsSubTab === 'configuration')) {
+    return (
+      <OkrConfigurationView
+        currentUser={currentUser}
+        onShowToast={onShowToast}
+        onBackToOperations={() => {
+          setTopContextTab && setTopContextTab('appraisals');
+          setOpsSubTab('objectives');
+        }}
+      />
+    );
+  }
+
   // ==================== 1. GETTING STARTED VIEW (08:54 - 09:52 of hr.webm) ====================
   if (topContextTab === 'gettingstarted') {
     return (
@@ -704,6 +720,19 @@ export default function PerformanceView({
                 className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded"
               >
                 + 6-Objective Goal Sheet
+              </button>
+            )}
+            {activeTab === 'okr' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setTopContextTab && setTopContextTab('configuration');
+                  setOpsSubTab('configuration');
+                }}
+                className="px-3.5 py-1.5 border border-[#0088ff] text-[#0088ff] hover:bg-blue-50 font-medium rounded flex items-center gap-1.5"
+              >
+                <Sliders size={13} />
+                <span>OKR Configuration</span>
               </button>
             )}
             {canEditPerfSettings && (

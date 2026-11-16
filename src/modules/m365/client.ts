@@ -75,7 +75,7 @@ export async function getActiveM365Config(db: PrismaClient): Promise<M365AppConf
     sharepointSiteUrl,
     sharepointSiteId: settings.sharepointSiteId ? String(settings.sharepointSiteId) : undefined,
     sharepointDriveId: settings.sharepointDriveId ? String(settings.sharepointDriveId) : undefined,
-    senderMailbox: String(settings.senderMailbox || 'noreply@ndakalaadvisory.co.ke'),
+    senderMailbox: String(settings.senderMailbox || process.env.M365_SENDER_MAILBOX || 'noreply@company.com'),
     appBaseUrl: String(settings.appBaseUrl || process.env.APP_BASE_URL || 'https://ndakalahr.duckdns.org').replace(/\/+$/, ''),
     loginBaseUrl: settings.loginBaseUrl ? String(settings.loginBaseUrl) : (process.env.M365_LOGIN_BASE_URL || undefined),
     graphBaseUrl: settings.graphBaseUrl ? String(settings.graphBaseUrl) : (process.env.M365_GRAPH_BASE_URL || undefined),

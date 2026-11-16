@@ -429,6 +429,8 @@ export function createWorkspaceRouter(deps: AppDeps): Router {
     'CANDIDATE_DRAFT',
     'WORKSPACE_FAVORITES',
     'HOME_TOUR_SEEN',
+    'OKR_CONFIG',
+    'ONBOARDING_CANDIDATES',
   ]);
 
   registerRoute(router, deps, {

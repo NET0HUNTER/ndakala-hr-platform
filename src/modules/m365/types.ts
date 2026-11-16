@@ -6,8 +6,8 @@ export interface M365AppConfig {
   sharepointSiteUrl: string;
   sharepointSiteId?: string;
   sharepointDriveId?: string;
-  senderMailbox: string; // e.g. noreply@ndakalaadvisory.co.ke
-  appBaseUrl: string;    // e.g. https://ndakalahr.duckdns.org
+  senderMailbox: string; // e.g. noreply@company.com
+  appBaseUrl: string;    // e.g. https://hr.company.com
   loginBaseUrl?: string; // override strictly allowed in test mode only
   graphBaseUrl?: string; // override strictly allowed in test mode only
 }

@@ -68,14 +68,14 @@ export default function IntegrationsSecurityView({
   // Organization Settings state (01:50 - 02:15 of hr.webm)
   const [orgTab, setOrgTab] = useState('details');
   const [orgDetails, setOrgDetails] = useState({
-    name: 'Ndakala Advisory LLP',
-    website: 'https://ndakalaadvisory.co.ke',
-    orgType: 'Financial Services',
+    name: 'Organization Profile',
+    website: '',
+    orgType: 'Professional & Business Services',
     contactPerson: 'People & Operations Office',
-    contactNumber: '+254 20 000 0000',
-    contactEmail: 'hr.lead@ndakalaadvisory.co.ke',
-    addressLine1: '246 Owashika Road, Lavington',
-    addressLine2: 'Nairobi Westlands',
+    contactNumber: '',
+    contactEmail: '',
+    addressLine1: '',
+    addressLine2: '',
     city: 'Nairobi',
     state: 'Nairobi County',
     country: 'Kenya',
@@ -102,10 +102,10 @@ export default function IntegrationsSecurityView({
   const [setupError, setSetupError] = useState('');
   const [savingSetup, setSavingSetup] = useState(false);
   const [setupForm, setSetupForm] = useState({
-    companyName: 'Ndakala Advisory LLP',
-    portalName: 'Ndakala People',
-    industry: 'Financial Services',
-    phone: '+254 20 000 0000',
+    companyName: '',
+    portalName: '',
+    industry: 'Professional & Business Services',
+    phone: '',
     employeeCount: String(employees.length || 0),
   });
 
@@ -122,6 +122,22 @@ export default function IntegrationsSecurityView({
           apiGet('/api/v1/workspace/ui-config?key=HOME_TOUR_SEEN').catch(() => null),
         ]);
         if (!active) return;
+        const orgData = orgRes?.data || orgRes;
+        const orgDomain = (orgData?.email && orgData.email.includes('@'))
+          ? orgData.email.split('@')[1]
+          : (orgData?.website ? orgData.website.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0] : 'company.com');
+
+        if (orgData) {
+          setOrgDetails((prev) => ({
+            ...prev,
+            name: orgData.legalName || orgData.tradingName || prev.name,
+            website: orgData.website ? (orgData.website.startsWith('http') ? orgData.website : `https://${orgData.website}`) : prev.website,
+            contactEmail: orgData.email || prev.contactEmail,
+            contactNumber: orgData.phone || prev.contactNumber,
+            addressLine1: orgData.address || prev.addressLine1,
+          }));
+        }
+
         const deptList = Array.isArray(deptsRes) ? deptsRes : deptsRes?.items || [];
         setDepartments(
           deptList.map((d) => ({
@@ -129,7 +145,7 @@ export default function IntegrationsSecurityView({
             name: d.name,
             code: d.code,
             users: d._count?.employees ?? 0,
-            alias: d.code ? `${String(d.code).toLowerCase()}@ndakalaadvisory.co.ke` : '-',
+            alias: d.code ? `${String(d.code).toLowerCase()}@${orgDomain}` : '-',
             lead: d.headOfDepartment ? `${d.headOfDepartment.firstName} ${d.headOfDepartment.lastName}` : '-',
           }))
         );
@@ -146,12 +162,11 @@ export default function IntegrationsSecurityView({
         setShiftsCount(shiftList.length);
 
         const savedSetup = setupCfg?.configs?.SETUP_WIZARD || setupCfg?.value;
-        const orgData = orgRes?.data || orgRes;
         setSetupForm((prev) => ({
           ...prev,
           ...(savedSetup && typeof savedSetup === 'object' ? savedSetup : {}),
-          companyName: savedSetup?.companyName || orgData?.legalName || prev.companyName,
-          portalName: savedSetup?.portalName || orgData?.tradingName || prev.portalName,
+          companyName: savedSetup?.companyName || orgData?.legalName || prev.companyName || 'Organization HR Portal',
+          portalName: savedSetup?.portalName || orgData?.tradingName || prev.portalName || 'HR Portal',
           phone: savedSetup?.phone || orgData?.phone || prev.phone,
           employeeCount: String(savedSetup?.employeeCount || employees.length || prev.employeeCount),
         }));

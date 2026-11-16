@@ -32,7 +32,7 @@ const MORE_SERVICES = [
   { id: 'travel', label: 'Travel', icon: Briefcase, color: 'text-orange-500', topTab: 'travel', subHint: 'travel' },
   { id: 'tasks', label: 'Tasks', icon: CheckCircle, color: 'text-emerald-600', topTab: 'tasks', subHint: 'tasks' },
   { id: 'payroll', label: 'Compensation', icon: DollarSign, color: 'text-blue-600', topTab: 'compensation' },
-  { id: 'okr', label: 'OKR', icon: Target, color: 'text-indigo-500', topTab: 'appraisals', subHint: 'objectives' },
+  { id: 'okr', label: 'OKR', icon: Target, color: 'text-indigo-500', topTab: 'configuration', subHint: 'configuration' },
 ];
 
 export default function Sidebar({

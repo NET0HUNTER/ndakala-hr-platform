@@ -220,12 +220,12 @@ export default function MyWorkspaceView({
   const [orgSearch, setOrgSearch] = useState('');
   const [orgDeptFilter, setOrgDeptFilter] = useState('ALL');
   const [orgProfile, setOrgProfile] = useState({
-    legalName: 'Ndakala Advisory LLP',
-    tradingName: 'Ndakala Advisory',
-    address: '246 Owashika Road, Lavington, Nairobi, Kenya',
-    phone: '+254 792 605 909',
-    email: 'info@ndakalaadvisory.co.ke',
-    website: 'www.ndakalaadvisory.co.ke',
+    legalName: 'Organization Profile',
+    tradingName: 'HR Platform',
+    address: '',
+    phone: '',
+    email: '',
+    website: '',
     timezone: 'Africa/Nairobi',
     currencyCode: 'KES',
   });

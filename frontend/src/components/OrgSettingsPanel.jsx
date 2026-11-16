@@ -67,8 +67,8 @@ export default function OrgSettingsPanel({
   const [grades, setGrades] = useState([]);
   const [fromAddresses, setFromAddresses] = useState([
     {
-      displayName: 'Ndakala HR Portal',
-      email: 'noreply@ndakalaadvisory.co.ke',
+      displayName: 'HR Portal',
+      email: 'noreply@company.com',
       verified: true,
       authenticated: true,
     },
@@ -121,7 +121,7 @@ export default function OrgSettingsPanel({
   const [customLogoText, setCustomLogoText] = useState(null);
   const [logoModalOpen, setLogoModalOpen] = useState(false);
   const [logoDraftText, setLogoDraftText] = useState('Ndakala People');
-  const [portalDomain, setPortalDomain] = useState('portal.ndakalaadvisory.co.ke');
+  const [portalDomain, setPortalDomain] = useState('portal.company.com');
   const importInputRef = useRef(null);
   const [pendingImportKind, setPendingImportKind] = useState(null);
 
@@ -140,6 +140,10 @@ export default function OrgSettingsPanel({
         apiGet('/api/v1/workspace/ui-config?key=ORG_LOGO_LABEL').catch(() => null),
       ]);
 
+      const orgDomain = (org?.email && org.email.includes('@'))
+        ? org.email.split('@')[1]
+        : (org?.website ? org.website.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0] : 'company.com');
+
       if (org) {
         setOrgDetails((prev) => ({
           ...prev,
@@ -149,6 +153,7 @@ export default function OrgSettingsPanel({
           contactEmail: org.email || prev.contactEmail,
           addressLine1: org.address || prev.addressLine1,
         }));
+        setPortalDomain((prev) => (!prev || prev === 'portal.company.com' || prev.includes('ndakala')) ? `portal.${orgDomain}` : prev);
       }
 
       const deptItems = unwrapList(depts);
@@ -163,7 +168,7 @@ export default function OrgSettingsPanel({
             parentDepartmentName: d.parentDepartment?.name || '',
             isActive: d.isActive !== false,
             users: d._count?.employees ?? d.employees?.length ?? 0,
-            alias: `${(d.code || 'dept').toLowerCase()}@ndakalaadvisory.co.ke`,
+            alias: `${(d.code || 'dept').toLowerCase()}@${orgDomain}`,
             lead: d.headOfDepartment
               ? `${d.headOfDepartment.firstName} ${d.headOfDepartment.lastName}`
               : 'Managing Partner',
@@ -1102,7 +1107,7 @@ export default function OrgSettingsPanel({
                 onClick={async () => {
                   const trimmedDomain = portalDomain.trim();
                   if (!trimmedDomain || !trimmedDomain.includes('.')) {
-                    toast('Enter a valid portal domain (e.g. portal.ndakalaadvisory.co.ke).', 'error');
+                    toast('Enter a valid portal domain (e.g. portal.company.com).', 'error');
                     return;
                   }
                   const trimmedLabel = logoDraftText.trim() || 'People';
@@ -1124,7 +1129,7 @@ export default function OrgSettingsPanel({
                 Save Domain & Branding
               </button>
               <span className="text-[11px] text-slate-400">
-                Support contact: hr-support@ndakalaadvisory.co.ke
+                Support contact: {orgDetails.contactEmail || 'hr-support@company.com'}
               </span>
             </div>
           </div>
@@ -1310,7 +1315,7 @@ export default function OrgSettingsPanel({
                 </label>
                 <input
                   type="email"
-                  placeholder="e.g. tax@ndakalaadvisory.co.ke"
+                  placeholder="e.g. dept@company.com"
                   value={deptForm.sharedM365Mailbox}
                   onChange={(e) => setDeptForm({ ...deptForm, sharedM365Mailbox: e.target.value })}
                   className="w-full px-3 py-2 border border-slate-300 rounded focus:outline-none focus:border-[#0088ff]"
@@ -1372,7 +1377,7 @@ export default function OrgSettingsPanel({
               <button type="button" onClick={() => setFromModalOpen(false)}><X size={15} /></button>
             </div>
             <input type="text" required placeholder="Display Name (e.g. HR People)" value={fromForm.displayName} onChange={(e) => setFromForm({ ...fromForm, displayName: e.target.value })} className="w-full px-3 py-2 border border-slate-300 rounded" />
-            <input type="email" required placeholder="hr@ndakalaadvisory.co.ke" value={fromForm.email} onChange={(e) => setFromForm({ ...fromForm, email: e.target.value })} className="w-full px-3 py-2 border border-slate-300 rounded" />
+            <input type="email" required placeholder="hr@company.com" value={fromForm.email} onChange={(e) => setFromForm({ ...fromForm, email: e.target.value })} className="w-full px-3 py-2 border border-slate-300 rounded" />
             <button type="submit" className="w-full py-2 bg-[#0088ff] text-white rounded font-medium">Save Email Address</button>
           </form>
         </div>

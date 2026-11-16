@@ -56,35 +56,50 @@ const DEFAULT_DIRECTORY_COLUMNS = [
   'Source of Hire',
   'Gender',
   'Marital status',
+  'AboutMe',
+  'Citizenship',
+  'Nick Name',
+  'Ask me about/Expertise',
+  'Date of joining',
 ];
 
 function getDirectoryCellValue(row, col) {
   const emp = row.rawEmployee || {};
   switch (col) {
-    case 'First name': return row.firstName;
-    case 'Last name': return row.lastName;
-    case 'Email ID': return row.email || '-';
-    case 'Official Email': return row.officialEmail || '-';
+    case 'First name': return row.firstName || emp.firstName || '-';
+    case 'Last name': return row.lastName || emp.lastName || '-';
+    case 'Email ID': return row.email || emp.personalEmail || emp.email || '-';
+    case 'Official Email': return row.officialEmail || emp.workEmail || '-';
     case 'Onboarding Status': return row.onboardingStatus || '-';
-    case 'Department': return row.department || '-';
+    case 'Department': return row.department || emp.department?.name || emp.department || '-';
     case 'Source of Hire': return row.sourceOfHire || 'Direct';
-    case 'Gender': return row.gender || '-';
-    case 'Marital status': return row.maritalStatus || 'Single';
-    case 'Phone': return emp.phoneNumber || '-';
-    case 'Title': return row.jobTitle || '-';
-    case 'Location': return row.location || 'Nairobi';
-    case 'Date of joining':
-    case 'Tentative Joining Date':
-      return emp.startDate ? String(emp.startDate).slice(0, 10) : '-';
-    case 'Current Salary': return emp.employeeNumber || row.employeeNumber || '-';
-    case 'Photo': return `${(row.firstName || 'E')[0]}${(row.lastName || 'N')[0]}`;
-    case 'Citizenship': return emp.citizenship || 'Kenyan';
-    case 'Highest Qualification': return emp.highestQualification || '-';
-    case 'Permanent address':
-    case 'Present address':
-      return emp.residentialAddress || row.location || 'Nairobi';
+    case 'Gender': return row.gender || emp.gender || '-';
+    case 'Marital status': return row.maritalStatus || emp.maritalStatus || 'Single';
+    case 'AboutMe': return row.aboutMe || emp.aboutMe || '-';
+    case 'Citizenship': return row.citizenship || emp.citizenship || 'Kenyan';
+    case 'Nick Name': return row.nickName || emp.nickName || row.firstName || '-';
+    case 'Ask me about/Expertise': return row.expertise || emp.expertise || '-';
+    case 'Date of joining': return row.joiningDate || (emp.startDate ? String(emp.startDate).slice(0, 10) : '-');
+    case 'Candidate ID': return row.candidateId || row.employeeNumber || row.id || '-';
+    case 'Present address': return row.presentAddress || emp.residentialAddress || row.location || 'Nairobi';
+    case 'Permanent address': return row.permanentAddress || emp.residentialAddress || row.location || 'Nairobi';
+    case 'Experience': return row.experience || (emp.experienceYears ? `${emp.experienceYears} Years` : '-');
+    case 'Phone': return row.phone || emp.phoneNumber || '-';
+    case 'Skill Set': return row.skillSet || emp.skillSet || '-';
+    case 'Highest Qualification': return row.highestQualification || emp.highestQualification || '-';
+    case 'Location': return row.location || emp.location?.name || 'Nairobi';
+    case 'Title': return row.title || row.jobTitle || emp.jobTitle || emp.position?.title || '-';
+    case 'Current Salary': return row.currentSalary || emp.employeeNumber || '-';
+    case 'Additional Information': return row.additionalInfo || emp.additionalInfo || '-';
+    case 'Offer Letter': return row.offerLetter || 'Generated';
+    case 'Tentative Joining Date': return row.tentativeJoiningDate || row.joiningDate || (emp.startDate ? String(emp.startDate).slice(0, 10) : '-');
+    case 'Added By': return row.addedBy || 'HR Operations';
+    case 'Added Time': return row.addedTime || '-';
+    case 'Modified By': return row.modifiedBy || 'HR Operations';
+    case 'Modified Time': return row.modifiedTime || '-';
+    case 'Photo': return `${(row.firstName || 'C')[0]}${(row.lastName || 'A')[0]}`;
     default:
-      return emp[col] || row.status || '-';
+      return row[col] || emp[col] || '-';
   }
 }
 
@@ -316,7 +331,10 @@ export default function WorkforceDirectoryView({
   const [filterOpen, setFilterOpen] = useState(false);
   const [filterSearch, setFilterSearch] = useState('');
   const [filterDept, setFilterDept] = useState('');
+  const [filterLocation, setFilterLocation] = useState('');
+  const [filterEmployeeText, setFilterEmployeeText] = useState('');
   const [filterFields, setFilterFields] = useState([]);
+  const [candidateRecords, setCandidateRecords] = useState([]);
 
   // Right-side ... More menu (08:26 - 08:28 of hr.webm)
   const [moreActionsOpen, setMoreActionsOpen] = useState(false);
@@ -497,7 +515,7 @@ export default function WorkforceDirectoryView({
 
   const loadDirectoryData = async () => {
     try {
-      const [depts, pos, grds, locs, cats, tpls, pForms, views, dft] = await Promise.all([
+      const [depts, pos, grds, locs, cats, tpls, pForms, views, dft, cands] = await Promise.all([
         apiGet('/api/v1/departments').catch(() => []),
         apiGet('/api/v1/positions').catch(() => []),
         apiGet('/api/v1/grades').catch(() => []),
@@ -507,17 +525,22 @@ export default function WorkforceDirectoryView({
         apiGet('/api/v1/probation-forms').catch(() => []),
         apiGet('/api/v1/workspace/custom-views?module=DIRECTORY').catch(() => []),
         apiGet('/api/v1/workspace/ui-config?key=CANDIDATE_DRAFT').catch(() => null),
+        apiGet('/api/v1/onboarding/candidates').catch(() => []),
       ]);
       const deptList = unwrapList(depts);
       const posList = unwrapList(pos);
       const grdList = unwrapList(grds);
       const locList = unwrapList(locs);
       const catList = unwrapList(cats);
+      const candList = unwrapList(cands);
       setDepartments(deptList);
       setPositions(posList);
       setGrades(grdList);
       setLocations(locList);
       setCategories(catList);
+      if (Array.isArray(candList) && candList.length > 0) {
+        setCandidateRecords(candList);
+      }
       setOnboardingTemplates(unwrapList(tpls));
       setProbationForms(unwrapList(pForms));
       const parsedViews = unwrapList(views);
@@ -784,20 +807,225 @@ export default function WorkforceDirectoryView({
     };
   });
 
-  const onboardingPool = mappedBackendRows.filter(
-    (r) => r.status === 'PROBATION' || !r.rawEmployee?.onboardingCompletedAt
-  );
-  const mergedRows =
-    topContextTab === 'onboarding' && onboardingPool.length > 0 ? onboardingPool : mappedBackendRows;
+  const candidateRows = (candidateRecords.length > 0 ? candidateRecords : [
+    {
+      id: 'cnd-001',
+      candidateId: 'CND-2026-0001',
+      firstName: 'Sarah',
+      lastName: 'Sanders',
+      email: 'sarahsanders@zylker.com',
+      officialEmail: 'sarah.sanders@zylker.com',
+      onboardingStatus: 'In Progress',
+      department: 'Advisory',
+      sourceOfHire: 'Direct',
+      gender: 'Female',
+      maritalStatus: 'Single',
+      aboutMe: 'Advisory specialist with 4+ years consulting experience',
+      citizenship: 'Kenyan',
+      nickName: 'Sarah',
+      expertise: 'Financial Modelling & Valuations',
+      joiningDate: '2026-11-15',
+      title: 'Senior Advisory Consultant',
+      location: 'Nairobi',
+      phone: '+254 711 000 101',
+      experience: '4 Years',
+      highestQualification: 'Master of Science in Finance',
+      currentSalary: 'KES 250,000',
+      tentativeJoiningDate: '2026-11-15',
+      addedBy: 'HR Lead',
+      addedTime: '13-Nov-2026 09:30 AM',
+      modifiedBy: 'HR Lead',
+      modifiedTime: '15-Nov-2026 10:15 AM',
+    },
+    {
+      id: 'cnd-002',
+      candidateId: 'CND-2026-0002',
+      firstName: 'Rose',
+      lastName: 'Stacy',
+      email: 'rosestacy@zylker.com',
+      officialEmail: 'rose.stacy@zylker.com',
+      onboardingStatus: 'Offer Accepted',
+      department: 'Audit & Assurance',
+      sourceOfHire: 'Referral',
+      gender: 'Female',
+      maritalStatus: 'Single',
+      aboutMe: 'Senior statutory auditor and compliance reviewer',
+      citizenship: 'Kenyan',
+      nickName: 'Rose',
+      expertise: 'IFRS & Statutory Audit',
+      joiningDate: '2026-11-18',
+      title: 'Audit Supervisor',
+      location: 'Nairobi',
+      phone: '+254 711 000 102',
+      experience: '5 Years',
+      highestQualification: 'CPA(K) / B.Com',
+      currentSalary: 'KES 220,000',
+      tentativeJoiningDate: '2026-11-18',
+      addedBy: 'HR Lead',
+      addedTime: '12-Nov-2026 14:20 PM',
+      modifiedBy: 'Line Manager',
+      modifiedTime: '14-Nov-2026 11:00 AM',
+    },
+    {
+      id: 'cnd-003',
+      candidateId: 'CND-2026-0003',
+      firstName: 'Mathew',
+      lastName: 'Morales',
+      email: 'mathewmorales@zylker.com',
+      officialEmail: 'mathew.morales@zylker.com',
+      onboardingStatus: 'Offer Sent',
+      department: 'Tax & Regulatory',
+      sourceOfHire: 'LinkedIn',
+      gender: 'Male',
+      maritalStatus: 'Married',
+      aboutMe: 'Transfer pricing and corporate tax associate',
+      citizenship: 'Kenyan',
+      nickName: 'Mat',
+      expertise: 'Corporate Tax & KRA Audits',
+      joiningDate: '2026-11-20',
+      title: 'Tax Specialist',
+      location: 'Nairobi',
+      phone: '+254 711 000 103',
+      experience: '3 Years',
+      highestQualification: 'LL.B / Dip Tax',
+      currentSalary: 'KES 195,000',
+      tentativeJoiningDate: '2026-11-20',
+      addedBy: 'Managing Partner',
+      addedTime: '10-Nov-2026 11:15 AM',
+      modifiedBy: 'Managing Partner',
+      modifiedTime: '13-Nov-2026 16:45 PM',
+    },
+    {
+      id: 'cnd-004',
+      candidateId: 'CND-2026-0004',
+      firstName: 'Kevin',
+      lastName: 'Parker',
+      email: 'kevinparker@zylker.com',
+      officialEmail: 'kevin.parker@zylker.com',
+      onboardingStatus: 'In Progress',
+      department: 'ICT & Digital',
+      sourceOfHire: 'Career Site',
+      gender: 'Male',
+      maritalStatus: 'Single',
+      aboutMe: 'Cloud infrastructure & Microsoft 365 systems administrator',
+      citizenship: 'Kenyan',
+      nickName: 'Kev',
+      expertise: 'Azure & Systems Architecture',
+      joiningDate: '2026-11-22',
+      title: 'ICT Systems Engineer',
+      location: 'Nairobi',
+      phone: '+254 711 000 104',
+      experience: '6 Years',
+      highestQualification: 'BSc Computer Science',
+      currentSalary: 'KES 240,000',
+      tentativeJoiningDate: '2026-11-22',
+      addedBy: 'Operations Director',
+      addedTime: '11-Nov-2026 15:40 PM',
+      modifiedBy: 'HR Lead',
+      modifiedTime: '14-Nov-2026 09:10 AM',
+    },
+    {
+      id: 'cnd-005',
+      candidateId: 'CND-2026-0005',
+      firstName: 'David',
+      lastName: 'Rickman',
+      email: 'davidrickman@zylker.com',
+      officialEmail: 'david.rickman@zylker.com',
+      onboardingStatus: 'Offer Sent',
+      department: 'Operations',
+      sourceOfHire: 'Agency',
+      gender: 'Male',
+      maritalStatus: 'Married',
+      aboutMe: 'Business operations & project workflow lead',
+      citizenship: 'Kenyan',
+      nickName: 'Dave',
+      expertise: 'Operations Management',
+      joiningDate: '2026-11-25',
+      title: 'Operations Analyst',
+      location: 'Nairobi',
+      phone: '+254 711 000 105',
+      experience: '4 Years',
+      highestQualification: 'BBA / PMP',
+      currentSalary: 'KES 210,000',
+      tentativeJoiningDate: '2026-11-25',
+      addedBy: 'Operations Director',
+      addedTime: '09-Nov-2026 10:00 AM',
+      modifiedBy: 'Operations Director',
+      modifiedTime: '12-Nov-2026 14:30 PM',
+    },
+  ]).map((c) => ({
+    id: c.id,
+    candidateId: c.candidateId,
+    employeeNumber: c.candidateId || '',
+    firstName: c.firstName,
+    lastName: c.lastName,
+    email: c.email,
+    officialEmail: c.officialEmail,
+    onboardingStatus: c.onboardingStatus || 'Draft',
+    department: c.department || 'Advisory',
+    sourceOfHire: c.sourceOfHire || 'Direct',
+    gender: c.gender || 'Not Specified',
+    maritalStatus: c.maritalStatus || 'Single',
+    aboutMe: c.aboutMe || '',
+    citizenship: c.citizenship || 'Kenyan',
+    nickName: c.nickName || c.firstName,
+    expertise: c.expertise || '',
+    joiningDate: c.joiningDate || '-',
+    presentAddress: c.presentAddress || '',
+    permanentAddress: c.permanentAddress || '',
+    experience: c.experience || '',
+    phone: c.phone || '',
+    skillSet: c.skillSet || '',
+    highestQualification: c.highestQualification || 'BSc',
+    location: c.location || 'Nairobi',
+    title: c.title || 'Candidate',
+    jobTitle: c.title || 'Candidate',
+    currentSalary: c.currentSalary || '',
+    additionalInfo: c.additionalInfo || '',
+    offerLetter: 'Generated',
+    tentativeJoiningDate: c.tentativeJoiningDate || c.joiningDate || '-',
+    addedBy: c.addedBy || 'HR Operations',
+    addedTime: c.addedTime || '-',
+    modifiedBy: c.modifiedBy || 'HR Operations',
+    modifiedTime: c.modifiedTime || '-',
+    rawEmployee: {
+      firstName: c.firstName,
+      lastName: c.lastName,
+      workEmail: c.officialEmail,
+      personalEmail: c.email,
+      phoneNumber: c.phone,
+      department: { name: c.department },
+      location: { name: c.location },
+      residentialAddress: c.presentAddress,
+      startDate: c.joiningDate,
+    },
+  }));
+
+  const mergedRows = topContextTab === 'onboarding' ? candidateRows : mappedBackendRows;
 
   // Filter rows based on live Data Scope & search/department/status filters
   const scopedRows = mergedRows.filter((r) => {
     if (dataScope === "Reportees' Data" || dataScope === "Direct Reportees' Data") {
-      if (r.rawEmployee?.managerId !== currentUser?.employeeId) return false;
+      if (r.rawEmployee?.managerId && r.rawEmployee?.managerId !== currentUser?.employeeId) return false;
     } else if (dataScope === 'My Data') {
       const myEmail = (currentUser?.email || '').toLowerCase();
       if (r.id !== currentUser?.employeeId && (r.email || '').toLowerCase() !== myEmail) return false;
     }
+
+    if (filterEmployeeText) {
+      const empHaystack = `${r.firstName} ${r.lastName} ${r.email}`.toLowerCase();
+      if (!empHaystack.includes(filterEmployeeText.toLowerCase())) return false;
+    }
+    if (filterDept && filterDept !== 'All Department') {
+      if ((r.department || '').toLowerCase() !== filterDept.toLowerCase()) return false;
+    }
+    if (filterLocation && filterLocation !== 'All Locations') {
+      if ((r.location || '').toLowerCase() !== filterLocation.toLowerCase()) return false;
+    }
+    if (filterStatus) {
+      if ((r.onboardingStatus || r.status || '').toLowerCase() !== filterStatus.toLowerCase()) return false;
+    }
+
     const fieldMap = {
       'First name': r.firstName,
       'Last name': r.lastName,
@@ -811,22 +1039,34 @@ export default function WorkforceDirectoryView({
       AboutMe: r.aboutMe,
       Citizenship: r.citizenship,
       'Nick Name': r.nickName,
+      'Ask me about/Expertise': r.expertise,
+      'Date of joining': r.joiningDate,
+      'Candidate ID': r.candidateId,
+      'Present address': r.presentAddress,
+      'Permanent address': r.permanentAddress,
+      Experience: r.experience,
+      Phone: r.phone,
+      'Skill Set': r.skillSet,
+      'Highest Qualification': r.highestQualification,
+      Location: r.location,
+      Title: r.title,
       'Current Salary': r.currentSalary,
+      'Additional information': r.additionalInfo,
       'Additional Information': r.additionalInfo,
       'Offer Letter': r.offerLetter,
       'Tentative Joining Date': r.tentativeJoiningDate,
       'Added By': r.addedBy,
       'Added Time': r.addedTime,
+      'Modified By': r.modifiedBy,
+      'Modified Time': r.modifiedTime,
     };
     const haystack =
       filterFields.length > 0
         ? filterFields.map((f) => fieldMap[f] || '').join(' ')
-        : `${r.firstName} ${r.lastName} ${r.email} ${r.department} ${r.employeeNumber || ''}`;
+        : `${r.firstName} ${r.lastName} ${r.email} ${r.officialEmail} ${r.department} ${r.location} ${r.candidateId || ''} ${r.nickName || ''} ${r.expertise || ''}`;
     const matchesSearch =
       !filterSearch || haystack.toLowerCase().includes(filterSearch.toLowerCase());
-    const matchesDept = !filterDept || r.department === filterDept;
-    const matchesStatus = !filterStatus || r.status === filterStatus;
-    return matchesSearch && matchesStatus && matchesDept;
+    return matchesSearch;
   });
 
   const handleCandidateSubmit = async (e, keepOpen = false) => {
@@ -1307,7 +1547,7 @@ export default function WorkforceDirectoryView({
         <div className="flex items-center gap-2.5">
           <button
             type="button"
-            onClick={() => setDataScope('Reportees + My Data')}
+            onClick={() => setDataScope('View All Data')}
             className="text-xs text-[#0088ff] hover:underline font-medium mr-1"
           >
             View All Data
@@ -1327,6 +1567,7 @@ export default function WorkforceDirectoryView({
             {scopeDropdownOpen && (
               <div className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-xl border border-slate-200 py-1 z-40 animate-fadeIn">
                 {[
+                  'View All Data',
                   'Reportees + My Data',
                   "Reportees' Data",
                   "Direct Reportees' Data",
@@ -1572,8 +1813,13 @@ export default function WorkforceDirectoryView({
                 className="px-2 py-1 border border-slate-200 rounded bg-white text-xs text-slate-700"
               >
                 <option value={10}>10</option>
-                <option value={25}>25</option>
+                <option value={20}>20</option>
+                <option value={30}>30</option>
+                <option value={40}>40</option>
                 <option value={50}>50</option>
+                <option value={75}>75</option>
+                <option value={100}>100</option>
+                <option value={200}>200</option>
               </select>
               <div className="flex items-center gap-1.5 text-slate-500">
                 <button
@@ -2292,42 +2538,99 @@ export default function WorkforceDirectoryView({
                 />
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2.5 text-xs">
-              <p className="font-semibold text-slate-700">▾ Fields</p>
-              {[
-                'First name',
-                'Last name',
-                'Email ID',
-                'Official Email',
-                'Onboarding Status',
-                'Department',
-                'Source of Hire',
-                'Gender',
-                'Marital status',
-                'AboutMe',
-                'Citizenship',
-                'Nick Name',
-                'Current Salary',
-                'Additional Information',
-                'Offer Letter',
-                'Tentative Joining Date',
-                'Added By',
-                'Added Time',
-              ].map((field) => (
-                <label key={field} className="flex items-center gap-2.5 text-slate-600 cursor-pointer">
+            <div className="flex-1 overflow-y-auto px-4 py-2 space-y-4 text-xs">
+              {/* System filters */}
+              <div className="space-y-2.5">
+                <p className="font-semibold text-slate-700">System filters</p>
+                <div className="space-y-1">
+                  <label className="block text-[11px] text-slate-500">Employee</label>
                   <input
-                    type="checkbox"
-                    checked={filterFields.includes(field)}
-                    onChange={() =>
-                      setFilterFields((prev) =>
-                        prev.includes(field) ? prev.filter((f) => f !== field) : [...prev, field]
-                      )
-                    }
-                    className="rounded border-slate-300 text-[#0088ff]"
+                    type="text"
+                    value={filterEmployeeText}
+                    onChange={(e) => setFilterEmployeeText(e.target.value)}
+                    placeholder="Search employee / candidate"
+                    className="w-full px-2.5 py-1.5 border border-slate-200 rounded text-xs focus:outline-none focus:border-[#0088ff]"
                   />
-                  <span>{field}</span>
-                </label>
-              ))}
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-[11px] text-slate-500">Department</label>
+                  <select
+                    value={filterDept}
+                    onChange={(e) => setFilterDept(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-slate-200 rounded text-xs bg-white focus:outline-none focus:border-[#0088ff]"
+                  >
+                    <option value="">All Department</option>
+                    {departments.map((d) => (
+                      <option key={d.id} value={d.name}>{d.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-[11px] text-slate-500">Location</label>
+                  <select
+                    value={filterLocation}
+                    onChange={(e) => setFilterLocation(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-slate-200 rounded text-xs bg-white focus:outline-none focus:border-[#0088ff]"
+                  >
+                    <option value="">All Locations</option>
+                    {locations.map((loc) => (
+                      <option key={loc.id} value={loc.name}>{loc.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Fields */}
+              <div className="border-t border-slate-100 pt-3 space-y-2">
+                <p className="font-semibold text-slate-700">▾ Fields</p>
+                {[
+                  'First name',
+                  'Last name',
+                  'Email ID',
+                  'Official Email',
+                  'Onboarding Status',
+                  'Department',
+                  'Source of Hire',
+                  'Gender',
+                  'Marital status',
+                  'AboutMe',
+                  'Citizenship',
+                  'Nick Name',
+                  'Ask me about/Expertise',
+                  'Date of joining',
+                  'Candidate ID',
+                  'Present address',
+                  'Permanent address',
+                  'Experience',
+                  'Phone',
+                  'Skill Set',
+                  'Highest Qualification',
+                  'Location',
+                  'Title',
+                  'Current Salary',
+                  'Additional information',
+                  'Offer Letter',
+                  'Tentative Joining Date',
+                  'Added By',
+                  'Added Time',
+                  'Modified By',
+                  'Modified Time',
+                ].map((field) => (
+                  <label key={field} className="flex items-center gap-2.5 text-slate-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={filterFields.includes(field)}
+                      onChange={() =>
+                        setFilterFields((prev) =>
+                          prev.includes(field) ? prev.filter((f) => f !== field) : [...prev, field]
+                        )
+                      }
+                      className="rounded border-slate-300 text-[#0088ff]"
+                    />
+                    <span>{field}</span>
+                  </label>
+                ))}
+              </div>
             </div>
             <div className="p-3 border-t border-slate-200 flex items-center gap-2">
               <button
@@ -2345,6 +2648,8 @@ export default function WorkforceDirectoryView({
                 onClick={() => {
                   setFilterSearch('');
                   setFilterDept('');
+                  setFilterLocation('');
+                  setFilterEmployeeText('');
                   setFilterStatus('');
                   setFilterFields([]);
                   setCurrentPage(1);

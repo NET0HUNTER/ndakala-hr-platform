@@ -31,7 +31,7 @@ const APPROVED_PROFILES: Record<IntegrationProvider, IntegrationBoundaryProfile>
   MICROSOFT_365: {
     provider: 'MICROSOFT_365',
     name: 'Microsoft 365 App-Only (SharePoint, Outlook Mail & Shared Dept Calendars)',
-    businessPurpose: 'App-Only SharePoint master vault dual-write & cold archival, link-only Outlook notifications from noreply@ndakalaadvisory.co.ke to department mailboxes, and non-blocking All-Day free calendar visibility',
+    businessPurpose: 'App-Only SharePoint master vault dual-write & cold archival, link-only Outlook notifications from configured noreply to department mailboxes, and non-blocking All-Day free calendar visibility',
     systemOwner: 'ICT & Security Administrator',
     lawfulPurpose: 'Performance of employment contract and legitimate business operational communication',
     dataMinimisationSummary: 'Zero-PII link-only email notices (no attachments, no salaries/medical details); standard staff authenticate locally with personal email + TOTP (SSO disabled for shared licenses).',
@@ -203,7 +203,7 @@ export class IntegrationService {
         sharepointSiteUrl: parsed.sharepointSiteUrl || '',
         sharepointSiteId: parsed.sharepointSiteId || '',
         sharepointDriveId: parsed.sharepointDriveId || '',
-        senderMailbox: parsed.senderMailbox || 'noreply@ndakalaadvisory.co.ke',
+        senderMailbox: parsed.senderMailbox || '',
         appBaseUrl: parsed.appBaseUrl || 'https://ndakalahr.duckdns.org',
         hasClientSecret: Boolean(parsed.clientSecret),
       };

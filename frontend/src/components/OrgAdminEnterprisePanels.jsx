@@ -74,12 +74,12 @@ export default function OrgAdminEnterprisePanels({
     tenantId: '',
     clientId: '',
     clientSecret: '',
-    sharepointSiteUrl: 'https://ndakalaadvisory.sharepoint.com/sites/NdakalaPeopleHR',
-    senderMailbox: 'noreply@ndakalaadvisory.co.ke',
-    appBaseUrl: 'https://ndakalahr.duckdns.org',
+    sharepointSiteUrl: '',
+    senderMailbox: '',
+    appBaseUrl: typeof window !== 'undefined' ? window.location.origin : 'https://ndakalahr.duckdns.org',
     hasClientSecret: false,
   });
-  const [m365TestMailbox, setM365TestMailbox] = useState('audit@ndakalaadvisory.co.ke');
+  const [m365TestMailbox, setM365TestMailbox] = useState('');
   const [m365TestResult, setM365TestResult] = useState(null);
   const [coldArchiveCfg, setColdArchiveCfg] = useState({ coldArchiveEnabled: false, coldArchiveMonths: 6 });
   const [coldArchiveReport, setColdArchiveReport] = useState(null);
@@ -137,19 +137,30 @@ export default function OrgAdminEnterprisePanels({
         if (runItems[0] && !eftForm.payrollRunId) {
           setEftForm((prev) => ({ ...prev, payrollRunId: runItems[0].id }));
         }
+        const orgDomain = (orgRec?.email && orgRec.email.includes('@'))
+          ? orgRec.email.split('@')[1]
+          : (orgRec?.website ? orgRec.website.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0] : 'company.com');
+
         if (m365Cfg?.settingsSummary) {
           setM365Form((prev) => ({
             ...prev,
             status: m365Cfg.status || 'DISABLED',
             tenantId: m365Cfg.settingsSummary.tenantId || '',
             clientId: m365Cfg.settingsSummary.clientId || '',
-            sharepointSiteUrl: m365Cfg.settingsSummary.sharepointSiteUrl || prev.sharepointSiteUrl,
-            senderMailbox: m365Cfg.settingsSummary.senderMailbox || 'noreply@ndakalaadvisory.co.ke',
-            appBaseUrl: m365Cfg.settingsSummary.appBaseUrl || 'https://ndakalahr.duckdns.org',
+            sharepointSiteUrl: m365Cfg.settingsSummary.sharepointSiteUrl || prev.sharepointSiteUrl || `https://${orgDomain.split('.')[0]}.sharepoint.com/sites/HRVault`,
+            senderMailbox: m365Cfg.settingsSummary.senderMailbox || `noreply@${orgDomain}`,
+            appBaseUrl: m365Cfg.settingsSummary.appBaseUrl || (typeof window !== 'undefined' ? window.location.origin : 'https://ndakalahr.duckdns.org'),
             hasClientSecret: Boolean(m365Cfg.settingsSummary.hasClientSecret),
             clientSecret: '',
           }));
+        } else {
+          setM365Form((prev) => ({
+            ...prev,
+            senderMailbox: prev.senderMailbox || `noreply@${orgDomain}`,
+            sharepointSiteUrl: prev.sharepointSiteUrl || `https://${orgDomain.split('.')[0]}.sharepoint.com/sites/HRVault`,
+          }));
         }
+        setM365TestMailbox((prev) => prev || `audit@${orgDomain}`);
         if (orgRec) {
           setColdArchiveCfg({
             coldArchiveEnabled: Boolean(orgRec.coldArchiveEnabled),
@@ -837,7 +848,7 @@ export default function OrgAdminEnterprisePanels({
                   type="email"
                   value={m365TestMailbox}
                   onChange={(e) => setM365TestMailbox(e.target.value)}
-                  placeholder="audit@ndakalaadvisory.co.ke"
+                  placeholder="recipient@company.com"
                   className="px-2.5 py-1 border border-slate-300 rounded w-52"
                 />
                 <button type="button" onClick={handleSendTestM365Mail} className="px-3 py-1.5 bg-slate-800 text-white rounded font-medium">
@@ -1280,7 +1291,7 @@ export default function OrgAdminEnterprisePanels({
                   type="email"
                   value={m365TestMailbox}
                   onChange={(e) => setM365TestMailbox(e.target.value)}
-                  placeholder="audit@ndakalaadvisory.co.ke"
+                  placeholder="recipient@company.com"
                   className="px-2.5 py-1 border border-slate-300 rounded w-52"
                 />
                 <button type="button" onClick={handleSendTestM365Mail} className="px-3 py-1.5 bg-slate-800 text-white rounded font-medium">
