@@ -2,9 +2,10 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { registerRoute } from '../../core/http/route.js';
 import type { AppDeps } from '../../core/http/context.js';
-import { notFound, conflict } from '../../core/errors/errors.js';
+import { notFound, conflict, forbidden, validation } from '../../core/errors/errors.js';
 import { writeAudit } from '../../core/audit/audit.js';
-import { startWorkflowInstance, processTaskAction } from './engine.js';
+import { startWorkflowInstance, processTaskAction, delegateWorkflowTask } from './engine.js';
+import { reviewLeaveRequest } from '../leave/service.js';
 
 export function createWorkflowRouter(deps: AppDeps): Router {
   const router = Router();
@@ -186,6 +187,372 @@ export function createWorkflowRouter(deps: AppDeps): Router {
           targetId: params.id,
           outcome: 'SUCCESS',
           reason: body.comments,
+        },
+      );
+
+      return result;
+    },
+  });
+
+  // 6. Operations Approvals Hub: Unified Approvals Feed (#operations/approvals)
+  registerRoute(router, deps, {
+    method: 'get',
+    path: '/operations/approvals',
+    auth: 'session',
+    query: z.object({
+      status: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'RETURNED', 'ALL']).default('PENDING'),
+      employeeStatus: z.enum(['ACTIVE', 'ALL']).default('ACTIVE'),
+      module: z.enum(['ALL', 'LEAVE', 'CONFIG', 'PROFILE']).default('ALL'),
+      search: z.string().optional(),
+    }),
+    handler: async ({ query, auth, deps }) => {
+      const isSuperAdmin = auth.roles.includes('managing_partner') || auth.roles.includes('head_of_hr') || auth.roles.includes('operations_director');
+      const canApproveLeave = auth.permissions?.includes('leave.approve') || isSuperAdmin;
+      const canApproveConfig = auth.permissions?.includes('config.approve') || isSuperAdmin;
+
+      // 6a. Query Workflow Tasks
+      const workflowTaskWhere: any = {};
+      if (query.status !== 'ALL') {
+        if (query.status === 'PENDING') workflowTaskWhere.status = 'PENDING';
+        else if (query.status === 'APPROVED') workflowTaskWhere.status = 'COMPLETED';
+        else if (query.status === 'REJECTED') workflowTaskWhere.status = 'REJECTED';
+      }
+      if (!isSuperAdmin) {
+        workflowTaskWhere.OR = [
+          { assignedUserId: auth.userId },
+          { assignedRoleKey: { in: auth.roles } },
+        ];
+      }
+
+      const tasks = await deps.prisma.workflowTask.findMany({
+        where: workflowTaskWhere,
+        include: {
+          instance: {
+            include: {
+              definition: { select: { code: true, name: true } },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      // Find user/employee info for workflow tasks
+      const initiatorIds = Array.from(new Set(tasks.map((t) => t.instance.initiatorUserId)));
+      const initiatorUsers = await deps.prisma.user.findMany({
+        where: { id: { in: initiatorIds } },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          employee: {
+            select: {
+              id: true,
+              employeeNumber: true,
+              firstName: true,
+              lastName: true,
+              employmentStatus: true,
+              department: { select: { name: true } },
+              designation: { select: { name: true } },
+            },
+          },
+        },
+      });
+      const userMap = new Map(initiatorUsers.map((u) => [u.id, u]));
+
+      // 6b. Query Leave Requests
+      const leaveWhere: any = {};
+      if (query.status !== 'ALL') {
+        if (query.status === 'PENDING') leaveWhere.status = 'PENDING_APPROVAL';
+        else if (query.status === 'APPROVED') leaveWhere.status = 'APPROVED';
+        else if (query.status === 'REJECTED') leaveWhere.status = 'REJECTED';
+        else if (query.status === 'RETURNED') leaveWhere.status = 'RETURNED_FOR_EDIT';
+      }
+      if (query.employeeStatus === 'ACTIVE') {
+        leaveWhere.employee = { employmentStatus: 'ACTIVE' };
+      }
+
+      // If user is line manager or HR, show requests they have access to
+      const leaveRequests = (query.module === 'ALL' || query.module === 'LEAVE')
+        ? await deps.prisma.leaveRequest.findMany({
+            where: leaveWhere,
+            include: {
+              employee: {
+                select: {
+                  id: true,
+                  employeeNumber: true,
+                  firstName: true,
+                  lastName: true,
+                  workEmail: true,
+                  employmentStatus: true,
+                  department: { select: { name: true } },
+                  designation: { select: { name: true } },
+                },
+              },
+              leaveType: {
+                select: { id: true, code: true, name: true, category: true },
+              },
+            },
+            orderBy: { submittedAt: 'desc' },
+          })
+        : [];
+
+      // Fetch all active employees for count resolution
+      const unifiedItems: any[] = [];
+
+      // Map workflow tasks
+      if (query.module === 'ALL' || query.module === 'CONFIG') {
+        for (const t of tasks) {
+          const initiator = userMap.get(t.instance.initiatorUserId);
+          const emp = initiator?.employee;
+
+          if (query.employeeStatus === 'ACTIVE' && emp && emp.employmentStatus !== 'ACTIVE') {
+            continue;
+          }
+
+          const statusNormalized =
+            t.status === 'PENDING' ? 'PENDING' : t.decision === 'APPROVED' ? 'APPROVED' : 'REJECTED';
+
+          const item = {
+            id: t.id,
+            source: 'WORKFLOW',
+            requestId: `WF-${t.instance.definition.code}-${t.id.slice(0, 6).toUpperCase()}`,
+            title: t.title || `${t.instance.definition.name}`,
+            module: 'CONFIG',
+            stageTitle: t.title,
+            initiator: {
+              id: initiator?.id || t.instance.initiatorUserId,
+              employeeNumber: emp?.employeeNumber || 'SYS',
+              firstName: emp?.firstName || initiator?.name?.split(' ')[0] || 'System',
+              lastName: emp?.lastName || initiator?.name?.split(' ').slice(1).join(' ') || 'User',
+              name: initiator?.name || `${emp?.firstName || ''} ${emp?.lastName || ''}`.trim() || initiator?.email || 'User',
+              email: initiator?.email || '',
+              departmentName: emp?.department?.name || 'Administration',
+              designationName: emp?.designation?.name || 'Authorized Officer',
+            },
+            submittedAt: t.createdAt.toISOString(),
+            dueDate: t.dueDate ? t.dueDate.toISOString() : null,
+            status: statusNormalized,
+            details: {
+              definitionName: t.instance.definition.name,
+              definitionCode: t.instance.definition.code,
+              targetType: t.instance.targetType,
+              targetId: t.instance.targetId,
+              description: t.description,
+            },
+            canApprove: canApproveConfig && t.status === 'PENDING',
+          };
+
+          if (query.search) {
+            const s = query.search.toLowerCase();
+            const matches =
+              item.requestId.toLowerCase().includes(s) ||
+              item.title.toLowerCase().includes(s) ||
+              item.initiator.name.toLowerCase().includes(s) ||
+              item.initiator.email.toLowerCase().includes(s);
+            if (!matches) continue;
+          }
+
+          unifiedItems.push(item);
+        }
+      }
+
+      // Map leave requests
+      for (const lr of leaveRequests) {
+        const statusNormalized =
+          lr.status === 'PENDING_APPROVAL'
+            ? 'PENDING'
+            : lr.status === 'APPROVED'
+            ? 'APPROVED'
+            : lr.status === 'RETURNED_FOR_EDIT'
+            ? 'RETURNED'
+            : 'REJECTED';
+
+        const item = {
+          id: lr.id,
+          source: 'LEAVE',
+          requestId: lr.requestNumber,
+          title: `Leave Application - ${lr.leaveType.name} (${lr.workingDaysDeducted} Day${lr.workingDaysDeducted === 1 ? '' : 's'})`,
+          module: 'LEAVE',
+          stageTitle: 'Line Manager & HR Review',
+          initiator: {
+            id: lr.employee.id,
+            employeeNumber: lr.employee.employeeNumber,
+            firstName: lr.employee.firstName,
+            lastName: lr.employee.lastName,
+            name: `${lr.employee.firstName} ${lr.employee.lastName}`,
+            email: lr.employee.workEmail,
+            departmentName: lr.employee.department?.name || 'Advisory',
+            designationName: lr.employee.designation?.name || 'Associate',
+          },
+          submittedAt: lr.submittedAt.toISOString(),
+          dueDate: new Date(lr.submittedAt.getTime() + 48 * 3600 * 1000).toISOString(),
+          status: statusNormalized,
+          details: {
+            leaveTypeCode: lr.leaveType.code,
+            leaveTypeName: lr.leaveType.name,
+            startDate: lr.startDate.toISOString().split('T')[0],
+            endDate: lr.endDate.toISOString().split('T')[0],
+            calendarDays: lr.calendarDays,
+            workingDaysDeducted: lr.workingDaysDeducted,
+            reason: lr.reason || 'Not disclosed',
+            isHalfDay: lr.isHalfDay,
+            halfDayType: lr.halfDayType,
+          },
+          canApprove: canApproveLeave && lr.status === 'PENDING_APPROVAL',
+        };
+
+        if (query.search) {
+          const s = query.search.toLowerCase();
+          const matches =
+            item.requestId.toLowerCase().includes(s) ||
+            item.title.toLowerCase().includes(s) ||
+            item.initiator.name.toLowerCase().includes(s) ||
+            item.initiator.email.toLowerCase().includes(s);
+          if (!matches) continue;
+        }
+
+        unifiedItems.push(item);
+      }
+
+      // Sort by submittedAt descending
+      unifiedItems.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+
+      // Calculate counts
+      const pendingCount = unifiedItems.filter((i) => i.status === 'PENDING').length;
+      const approvedCount = unifiedItems.filter((i) => i.status === 'APPROVED').length;
+      const rejectedCount = unifiedItems.filter((i) => i.status === 'REJECTED').length;
+
+      return {
+        data: unifiedItems,
+        counts: {
+          pendingCount,
+          approvedCount,
+          rejectedCount,
+          totalCount: unifiedItems.length,
+        },
+      };
+    },
+  });
+
+  // 7. Operations Approvals Hub: Batch Process Approvals
+  registerRoute(router, deps, {
+    method: 'post',
+    path: '/operations/approvals/batch',
+    auth: 'session',
+    body: z.object({
+      itemIds: z.array(z.string().uuid()).min(1),
+      action: z.enum(['APPROVE', 'REJECT', 'RETURN']),
+      comments: z.string().max(500).optional(),
+    }),
+    handler: async ({ body, auth, req, deps }) => {
+      const results: any[] = [];
+      const successfulIds: string[] = [];
+      const failedIds: string[] = [];
+
+      for (const id of body.itemIds) {
+        try {
+          // Check if this is a Leave Request
+          const leaveReq = await deps.prisma.leaveRequest.findUnique({
+            where: { id },
+          });
+
+          if (leaveReq) {
+            const leaveResult = await reviewLeaveRequest(deps.prisma, auth, {
+              requestId: id,
+              decision: body.action,
+              comments: body.comments || `Batch ${body.action.toLowerCase()} via Operations Approvals Hub`,
+            });
+            results.push({ id, source: 'LEAVE', success: true, result: leaveResult });
+            successfulIds.push(id);
+            continue;
+          }
+
+          // Otherwise check if this is a Workflow Task
+          const task = await deps.prisma.workflowTask.findUnique({
+            where: { id },
+          });
+
+          if (task) {
+            const taskResult = await processTaskAction(
+              deps.prisma,
+              id,
+              auth.userId,
+              auth.roles,
+              body.action,
+              body.comments,
+            );
+            results.push({ id, source: 'WORKFLOW', success: true, result: taskResult });
+            successfulIds.push(id);
+            continue;
+          }
+
+          failedIds.push(id);
+          results.push({ id, success: false, error: 'Approval item not found' });
+        } catch (err: any) {
+          failedIds.push(id);
+          results.push({ id, success: false, error: err.message || 'Execution error' });
+        }
+      }
+
+      await writeAudit(
+        deps.prisma,
+        { userId: auth.userId, email: auth.email, role: auth.roles[0], correlationId: req.requestId },
+        {
+          action: `OPERATIONS_APPROVALS_BATCH_${body.action}`,
+          targetType: 'ApprovalBatch',
+          targetId: successfulIds.join(','),
+          outcome: successfulIds.length > 0 ? 'SUCCESS' : 'FAILED',
+          after: { count: successfulIds.length, action: body.action },
+        },
+      );
+
+      return {
+        success: successfulIds.length > 0,
+        processedCount: successfulIds.length,
+        successfulIds,
+        failedIds,
+        results,
+      };
+    },
+  });
+
+  // 8. Operations Approvals Hub: Delegate Approval
+  registerRoute(router, deps, {
+    method: 'post',
+    path: '/operations/approvals/:id/delegate',
+    auth: 'session',
+    params: z.object({ id: z.string().uuid() }),
+    body: z.object({
+      delegateUserId: z.string().uuid(),
+      notes: z.string().max(500).optional(),
+    }),
+    handler: async ({ params, body, auth, req, deps }) => {
+      const task = await deps.prisma.workflowTask.findUnique({
+        where: { id: params.id },
+      });
+
+      if (!task) {
+        throw notFound('WorkflowTask', params.id);
+      }
+
+      const result = await delegateWorkflowTask(
+        deps.prisma,
+        params.id,
+        auth.userId,
+        auth.roles,
+        body.delegateUserId,
+        body.notes,
+      );
+
+      await writeAudit(
+        deps.prisma,
+        { userId: auth.userId, email: auth.email, role: auth.roles[0], correlationId: req.requestId },
+        {
+          action: 'OPERATIONS_APPROVAL_DELEGATED',
+          targetType: 'WorkflowTask',
+          targetId: params.id,
+          outcome: 'SUCCESS',
+          after: { delegateUserId: body.delegateUserId, notes: body.notes },
         },
       );
 

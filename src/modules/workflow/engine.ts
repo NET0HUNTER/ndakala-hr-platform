@@ -272,3 +272,62 @@ export async function processTaskAction(
     return { status: 'APPROVED', completed: true, taskCompleted: true };
   }
 }
+
+export async function delegateWorkflowTask(
+  prisma: PrismaClient,
+  taskId: string,
+  actorUserId: string,
+  actorRoles: string[],
+  delegateUserId: string,
+  notes?: string,
+) {
+  const task = await prisma.workflowTask.findUnique({
+    where: { id: taskId },
+    include: {
+      instance: {
+        include: { definition: true },
+      },
+    },
+  });
+
+  if (!task) throw notFound('WorkflowTask', taskId);
+  if (task.status !== 'PENDING') throw conflict(`Task is already completed with status: ${task.status}`);
+
+  const delegateUser = await prisma.user.findUnique({ where: { id: delegateUserId } });
+  if (!delegateUser) throw notFound('User', delegateUserId);
+
+  let isAuthorized = false;
+  if (task.assignedUserId && task.assignedUserId === actorUserId) isAuthorized = true;
+  if (task.assignedRoleKey && actorRoles.includes(task.assignedRoleKey)) isAuthorized = true;
+  if (actorRoles.includes('managing_partner') || actorRoles.includes('head_of_hr')) isAuthorized = true;
+  if (!isAuthorized) {
+    throw forbidden('Not authorized to delegate this approval task.');
+  }
+
+  const now = new Date();
+  const history = JSON.parse(task.instance.history || '[]');
+  history.push({
+    timestamp: now.toISOString(),
+    action: 'TASK_DELEGATED',
+    actorUserId,
+    stageIndex: task.stageIndex,
+    stageTitle: task.title,
+    delegatedToUserId: delegateUserId,
+    comments: notes || null,
+  });
+
+  const updatedTask = await prisma.workflowTask.update({
+    where: { id: task.id },
+    data: {
+      assignedUserId: delegateUserId,
+      description: `Delegated to ${delegateUser.name || delegateUser.email}: ${notes || 'Reassigned by approver'}`,
+    },
+  });
+
+  await prisma.workflowInstance.update({
+    where: { id: task.instanceId },
+    data: { history: JSON.stringify(history) },
+  });
+
+  return { status: 'DELEGATED', task: updatedTask, delegateUserId };
+}

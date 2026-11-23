@@ -10,6 +10,7 @@ import PayrollView from './views/PayrollView';
 import PerformanceView from './views/PerformanceView';
 import GovernanceView from './views/GovernanceView';
 import IntegrationsSecurityView from './views/IntegrationsSecurityView';
+import OperationsHubView from './views/OperationsHubView';
 import ReportsView from './views/ReportsView';
 import LeaveRequestModal, {
   findOverlappingLeaveRequests,
@@ -849,7 +850,23 @@ export default function App() {
             />
           )}
 
-          {(activeTab === 'operations' || activeTab === 'hardening') && (
+          {activeTab === 'operations' && (
+            <OperationsHubView
+              currentUser={currentUser}
+              initialSubView={topContextTab === 'approvals' || subViewHint === 'approvals' ? 'approvals' : null}
+              onShowToast={showToast}
+              onNavigateTab={(tab, sub) => {
+                if (tab === 'operations') {
+                  setTopContextTab(sub || 'operations');
+                  setSubViewHint(sub);
+                } else {
+                  handleSelectModule(tab, sub);
+                }
+              }}
+            />
+          )}
+
+          {activeTab === 'hardening' && (
             <IntegrationsSecurityView
               activeTab={activeTab}
               topContextTab={topContextTab}

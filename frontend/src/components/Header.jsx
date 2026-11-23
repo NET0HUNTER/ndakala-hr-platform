@@ -162,7 +162,10 @@ export default function Header({
           { id: 'audit', label: 'Governance & Audit Logs' },
         ];
       case 'operations':
-        return [{ id: 'operations', label: 'Operations' }];
+        return [
+          { id: 'operations', label: 'Operations' },
+          { id: 'approvals', label: 'Approvals' },
+        ];
       case 'reports':
         return [
           { id: 'myreports', label: 'My Reports' },
