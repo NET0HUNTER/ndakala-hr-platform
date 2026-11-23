@@ -17,7 +17,7 @@
 | **01** | **Global Shell & Top/Bottom Rails** | `[~]` | **P0** | Quick-Action modal split (`+`), Global Employee Search, Bottom utility pins (`My Pins`, `Support Hub`). |
 | **02** | **Home (My Space, Team, Org)** | `[x]` | **P0** | Multi-space tabs (`My Space`, `Team Space`, `Organization Space`), interactive recursive SVG/DOM Employee Tree (Org Chart), Search highlighting, Expand/Collapse, Profile Drawer, and Team Space feed deck. |
 | **03** | **Onboarding (Candidate Hub)** | `[x]` | **P1** | 7-section Add Candidate modal with repeating tabular grids (Education, Experience, Dependents), draft auto-save persistence, 31-field filter drawer, and data scope dropdown. |
-| **04** | **Leave Tracker** | `[~]` | **P0** | `Leave Summary` Calendar vs. List toggle, `Shift` weekly/monthly timeline, `Team` On-Leave calendar. |
+| **04** | **Leave Tracker** | `[x]` | **P0** | Parity verified: Leave Summary List View, Monthly Calendar heat map, Shift & Schedules, Team Leave Queue, 8-type statutory/enhanced Apply Leave modal. |
 | **05** | **Attendance** | `[x]` | **P0** | Exact 9-column statutory attendance grid, live digital punch widget, display unit toggle (Hours/Days), Regularization request drawer, and Team Attendance Kanban. |
 | **06** | **Time Tracker** | `[~]` | **P1** | Split-button `Log Time` (Daily/Weekly/Monthly), Job Schedule 24-hr weekly grid, Client Rate Cards. |
 | **07** | **Performance & OKR** | `[~]` | **P1** | Sub-tabs `KRA`, `Competency`, `Skill Set Matrix` (Organization vs. Reportees rating grid). |
@@ -88,18 +88,19 @@
   - `[ ]` Tabular Repeating Grid 3: **Dependent Details** (`Name`, `Relationship`, `Date of Birth`).
 
 ### P0.4 Leave Tracker (`#leavetracker`)
-- `[x]` Leave balance cards (Annual, Sick, Maternity, Paternity, Compassionate, Unpaid).
-- `[x]` Apply Leave modal with date range, half-day picker, reason, handover notes.
+- `[x]` Leave balance cards (Annual, Sick, Maternity, Paternity, Compassionate, Unpaid, Study/Exam, Sabbatical).
+- `[x]` Apply Leave modal with date range, half-day picker, reason, handover notes, file attachment upload, and notice calculations.
 - `[x]` Outlook Shared Calendar sync (All-Day non-blocking `showAs: free`).
 - `[x]` Relieving Officer assignment and approval flow.
-- `[~]` **Leave Summary Views**:
-  - `[x]` List View.
-  - `[ ]` Calendar View (Monthly color-coded heat map of leaves).
-- `[~]` **Shift Mapping**:
-  - `[ ]` Weekly / Monthly timeline showing assigned shifts (`General 9:00 AM - 6:00 PM`).
-- `[~]` **Team Tab**:
-  - `[ ]` `On Leave` team schedule widget.
-  - `[ ]` Subordinate leave approval queue with inline approve/reject.
+- `[x]` **Leave Summary Views**:
+  - `[x]` List View with balance cards, summary stats (booked/pending), and filter controls.
+  - `[x]` Calendar View (Monthly color-coded heat map of leaves, amber weekend highlighting `#fffbeb`, holiday badges, and month navigation).
+- `[x]` **Shift Mapping**:
+  - `[x]` Weekly / Monthly timeline showing assigned shifts (`General 9:00 AM - 6:00 PM`, working days, rest days, daily hours).
+- `[x]` **Team Tab**:
+  - `[x]` Subordinate leave approval queue with inline approve/reject/return controls.
+  - `[x]` 4/4 passing Vitest tests in `tests/leave_tracker_parity.test.ts`.
+  - `[x]` Verified live on Contabo VPS (`https://ndakalahr.duckdns.org`) with screenshot evidence under `docs/zoho_people_spec/screenshots/leave/`.
 
 ### P0.5 Attendance Tracker (`#attendance`)
 - `[x]` Punch In / Punch Out clock with live timestamp.
