@@ -67,7 +67,7 @@ describe('Operations Approvals Hub Parity (#operations/approvals)', () => {
       });
 
     expect(createRes.status).toBe(201);
-    const leaveRequestId = createRes.body.data.id;
+    const leaveRequestId = createRes.body.data.request?.id || createRes.body.data.id;
 
     // 2. Head of HR / Managing Partner batch approves the request via Operations Approvals Hub
     const admin = await loginClient(app, 'managing.partner@ndakalaadvisory.co.ke');
@@ -104,7 +104,7 @@ describe('Operations Approvals Hub Parity (#operations/approvals)', () => {
       });
 
     expect(createRes.status).toBe(201);
-    const leaveRequestId = createRes.body.data.id;
+    const leaveRequestId = createRes.body.data.request?.id || createRes.body.data.id;
 
     const admin = await loginClient(app, 'managing.partner@ndakalaadvisory.co.ke');
     const batchRes = await admin.agent
