@@ -490,7 +490,7 @@ export function SkillSetMatrixPanel({ employees = [], currentUser, onShowToast }
                       {emp.firstName} {emp.lastName}
                     </div>
                     <div className="text-[10px] text-slate-500">
-                      {emp.employeeNumber} • {emp.jobTitle || 'Associate'}
+                      {emp.employeeNumber} • {emp.position?.title || emp.jobTitle || emp.roleName || 'Staff'}
                     </div>
                   </td>
                   {DEFAULT_SKILLS.map((_, idx) => {

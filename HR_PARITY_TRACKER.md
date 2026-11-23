@@ -30,7 +30,7 @@
 | **14** | **Employee Engagement & Surveys** | `[ ]` | **P2** | Satisfaction surveys, pulse polls, eNPS metric tracking. |
 | **15** | **Approvals (Operations)** | `[x]` | **P0** | Unified `#operations/approvals` dashboard with 17-service Operations Hub, status pills (`Pending`, `Active`), multi-select batch actions, Request Details Drawer, and M365 event sync. |
 | **16** | **Reports Catalogue (47+ Reports)** | `[~]` | **P2** | Categorized reports explorer, Muster Roll, Presence Hours Breakup, Nine-Box Matrix, statutory exports. |
-| **17** | **Settings & Administration** | `[~]` | **P1** | 19-service administrative card grid, Custom Services builder, granular Role-Based Access Control matrix. |
+| **17** | **Settings & Administration** | `[x]` | **P1** | Parity verified: 19-service administrative card directory (`SettingsServicesHub.jsx`) with search, category filters, Active/Paused toggles, direct navigation, plus `Automation & Blueprints` engine (Workflows, Blueprints, Zero-PII Email Alerts & Webhooks). |
 
 ---
 
@@ -188,9 +188,10 @@
 - `[x]` Microsoft 365 App-Only credentials & SharePoint vault settings.
 - `[x]` Cold archive retention policy (default 6 months) with verified disk purge.
 - `[x]` Break-glass emergency admin route & TOTP MFA.
-- `[~]` **19-Service Administrative Hub**:
-  - `[ ]` Visual card grid for all 19 configuration domains matching Zoho People Settings.
-  - `[ ]` `Automation` visual builder (Workflows, Blueprints, Email Alert templates, Webhook triggers).
+- `[x]` **19-Service Administrative Hub**:
+  - `[x]` Visual card grid for all 19 configuration domains (`SettingsServicesHub.jsx`) with search, category filter pills, and Active/Paused toggles.
+  - `[x]` `Automation & Blueprints` builder (Workflows with create & toggle, multi-stage Blueprints, Zero-PII M365 Email Alerts & Webhooks).
+- `[x]` 2/2 passing Vitest tests in `tests/settings_hub_parity.test.ts`.
 
 ---
 

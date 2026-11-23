@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { apiGet, apiPatch, apiPut } from '../utils/api';
 import OrgSettingsPanel from '../components/OrgSettingsPanel';
+import { SettingsServicesGrid, AutomationBuilderPanel } from './SettingsServicesHub';
 import {
   Search,
   UserPlus,
@@ -632,6 +633,22 @@ export default function IntegrationsSecurityView({
         )}
       </div>
     );
+  }
+
+  // ==================== 2B. 19-SERVICE ADMINISTRATIVE HUB ====================
+  if (topContextTab === 'services') {
+    return (
+      <SettingsServicesGrid
+        onNavigateModule={(tab, top, sub) => setActiveTab && setActiveTab(tab, top, sub)}
+        onSwitchSettingsTab={(nextTab) => setTopContextTab && setTopContextTab(nextTab)}
+        onShowToast={onShowToast}
+      />
+    );
+  }
+
+  // ==================== 2C. AUTOMATION & BLUEPRINTS BUILDER ====================
+  if (topContextTab === 'automation') {
+    return <AutomationBuilderPanel onShowToast={onShowToast} />;
   }
 
   // ==================== 3. ORGANIZATION SETTINGS ====================

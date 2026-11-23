@@ -174,7 +174,9 @@ export default function Header({
         ];
       case 'hardening':
         return [
+          { id: 'services', label: 'Services Hub (19)' },
           { id: 'orgsettings', label: 'Manage Account & Organization' },
+          { id: 'automation', label: 'Automation & Blueprints' },
           { id: 'gettingstarted', label: 'Ndakala People Welcome' },
         ];
       default:
@@ -538,7 +540,7 @@ export default function Header({
             <button
               type="button"
               onClick={() => {
-                setActiveTab('hardening', 'orgsettings');
+                setActiveTab('hardening', 'services');
               }}
               title="Settings"
               className={`p-1.5 rounded transition-colors ${
