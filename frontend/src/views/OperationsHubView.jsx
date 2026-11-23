@@ -44,7 +44,7 @@ export default function OperationsHubView({
   useEffect(() => {
     async function loadCounts() {
       try {
-        const res = await apiGet('/operations/approvals?status=PENDING');
+        const res = await apiGet('/api/v1/operations/approvals?status=PENDING');
         if (res?.counts?.pendingCount !== undefined) {
           setPendingApprovalsCount(res.counts.pendingCount);
         } else if (Array.isArray(res?.data)) {

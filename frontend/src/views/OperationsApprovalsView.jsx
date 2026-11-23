@@ -60,7 +60,7 @@ export default function OperationsApprovalsView({
       if (moduleFilter !== 'ALL') params.append('module', moduleFilter);
       if (searchQuery.trim()) params.append('search', searchQuery.trim());
 
-      const res = await apiGet(`/operations/approvals?${params.toString()}`);
+      const res = await apiGet(`/api/v1/operations/approvals?${params.toString()}`);
       if (res && res.data) {
         setApprovals(res.data);
         if (res.counts) setCounts(res.counts);
@@ -99,7 +99,7 @@ export default function OperationsApprovalsView({
     if (selectedIds.length === 0) return;
     setActionInProgress(true);
     try {
-      const res = await apiPost('/operations/approvals/batch', {
+      const res = await apiPost('/api/v1/operations/approvals/batch', {
         itemIds: selectedIds,
         action,
         comments: comments || `Batch ${action.toLowerCase()} from Operations Approvals Hub`,
@@ -127,7 +127,7 @@ export default function OperationsApprovalsView({
   const handleSingleAction = async (item, action, comments = '') => {
     setActionInProgress(true);
     try {
-      const res = await apiPost('/operations/approvals/batch', {
+      const res = await apiPost('/api/v1/operations/approvals/batch', {
         itemIds: [item.id],
         action,
         comments: comments || `${action} from Operations Approvals Hub`,
