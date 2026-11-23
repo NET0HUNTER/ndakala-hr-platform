@@ -113,7 +113,7 @@ export default function AddEmployeeWizardModal({
             </div>
             <div>
               <h3 className="text-sm font-bold">Add Employee Wizard</h3>
-              <p className="text-[11px] text-slate-300">4-Step Zoho People 5.0 Onboarding & Provisioning</p>
+              <p className="text-[11px] text-slate-300">4-Step Employee Onboarding & Provisioning</p>
             </div>
           </div>
           <button

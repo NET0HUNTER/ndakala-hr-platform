@@ -138,7 +138,7 @@ export default function OkrConfigurationView({
     setMaxObjectives(6);
     setKrCheckInFrequency('Bi-weekly');
     setAllowCustomMetrics(true);
-    toast('Reset to default Zoho OKR configuration parameters.');
+    toast('Reset to default OKR configuration parameters.');
   };
 
   const handleRangeChange = (id, field, value) => {
@@ -568,7 +568,7 @@ export default function OkrConfigurationView({
       {/* Zoho People Help / Widget Footer */}
       <div className="h-[28px] bg-slate-100 border-t border-slate-200 px-4 flex items-center justify-between text-[11px] text-slate-500 flex-shrink-0">
         <div className="flex items-center gap-2">
-          <span>Welcome to Zoho People Help widget</span>
+          <span>OKR Help & Guidance</span>
         </div>
         <div className="flex items-center gap-4">
           <span>English</span>

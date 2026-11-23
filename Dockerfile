@@ -30,7 +30,7 @@ WORKDIR /app
 RUN apt-get update -y && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Copy package configurations and built artifacts
-COPY package*.json ./
+COPY package*.json tailwind.config.js ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY prisma ./prisma
 COPY docker-entrypoint.sh ./docker-entrypoint.sh

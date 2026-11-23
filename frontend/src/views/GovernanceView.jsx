@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import TimeTrackerView from './TimeTrackerView';
+import JobScheduleGridView from './JobScheduleGridView';
+import LogTimeModal from './modals/LogTimeModal';
 import FilesView from './FilesView';
 import InlineDocumentViewerModal from './modals/InlineDocumentViewerModal';
 import {
@@ -79,6 +81,8 @@ export default function GovernanceView({
   );
   const [weekOffset, setWeekOffset] = useState(0);
   const [logDropdownOpen, setLogDropdownOpen] = useState(false);
+  const [logTimeModalOpen, setLogTimeModalOpen] = useState(false);
+  const [logTimeModalMode, setLogTimeModalMode] = useState('daily');
   const [timeFilterOpen, setTimeFilterOpen] = useState(false);
   const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
   const [jobDropdownOpen, setJobDropdownOpen] = useState(false);
@@ -538,6 +542,7 @@ export default function GovernanceView({
             { id: 'timesheets', label: 'Timesheets' },
             { id: 'jobs', label: 'Jobs & Rates' },
             { id: 'projects', label: 'Projects & Gantt' },
+            { id: 'job_schedule', label: 'Job Schedule' },
             { id: 'schedule', label: 'Period Lock' },
             { id: 'approvals', label: 'Approvals' },
             { id: 'profitability', label: 'Profitability KPIs' },
@@ -571,6 +576,17 @@ export default function GovernanceView({
               employees={employees}
               onShowToast={onShowToast}
               initialSubTab={mapToEmbeddedTab[timeSubTab]}
+            />
+          </div>
+        )}
+
+        {/* Weekly 24-Hour Job Schedule Grid */}
+        {timeSubTab === 'job_schedule' && (
+          <div className="flex-1 overflow-y-auto">
+            <JobScheduleGridView
+              employees={employees}
+              projects={ttProjects}
+              onShowToast={onShowToast}
             />
           </div>
         )}
@@ -981,31 +997,43 @@ export default function GovernanceView({
               </div>
 
               <div className="flex items-center gap-2">
-                <div className="relative">
+                <div className="relative inline-flex rounded overflow-visible shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLogDropdownOpen(false);
+                      setLogTimeModalMode('daily');
+                      setLogTimeModalOpen(true);
+                    }}
+                    className="px-3.5 py-1.5 bg-[#0088ff] hover:bg-[#0073d9] text-white text-xs font-medium rounded-l border-r border-blue-400/50"
+                  >
+                    Log Time
+                  </button>
                   <button
                     type="button"
                     onClick={() => setLogDropdownOpen(!logDropdownOpen)}
-                    className="px-3.5 py-1.5 bg-[#0088ff] hover:bg-[#0073d9] text-white text-xs font-medium rounded flex items-center gap-2 shadow-2xs"
+                    title="Select Log Time Mode"
+                    className="px-2 py-1.5 bg-[#0088ff] hover:bg-[#0073d9] text-white text-xs font-medium rounded-r flex items-center"
                   >
-                    <span>Log Time</span>
                     <ChevronDown size={13} />
                   </button>
                   {logDropdownOpen && (
-                    <div className="absolute right-0 mt-1 w-44 bg-white rounded-md shadow-xl border border-slate-200 py-1.5 z-40 text-xs animate-fadeIn">
+                    <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-md shadow-xl border border-slate-200 py-1.5 z-40 text-xs">
                       {[
-                        { label: 'Log Time (Quick)', hrs: Number(manualHours) || 2 },
-                        { label: 'Daily Log (8h)', hrs: 8 },
-                        { label: 'Half-Day Log (4h)', hrs: 4 },
-                        { label: 'Advisory Block (2h)', hrs: 2 },
+                        { label: 'Daily Log', mode: 'daily' },
+                        { label: 'Weekly Log', mode: 'weekly' },
+                        { label: 'Semi Monthly Log', mode: 'semimonthly' },
+                        { label: 'Monthly Log', mode: 'monthly' },
                       ].map((opt) => (
                         <button
-                          key={opt.label}
+                          key={opt.mode}
                           type="button"
-                          onClick={async () => {
+                          onClick={() => {
                             setLogDropdownOpen(false);
-                            await handleQuickLogTime(opt.hrs, workNote || opt.label);
+                            setLogTimeModalMode(opt.mode);
+                            setLogTimeModalOpen(true);
                           }}
-                          className="w-full px-3.5 py-2 text-left text-slate-700 hover:bg-slate-50"
+                          className="w-full px-3.5 py-2 text-left text-slate-700 hover:bg-blue-50 hover:text-[#0088ff] font-medium"
                         >
                           {opt.label}
                         </button>
@@ -1448,6 +1476,15 @@ export default function GovernanceView({
             )}
           </>
         )}
+
+        <LogTimeModal
+          isOpen={logTimeModalOpen}
+          initialMode={logTimeModalMode}
+          onClose={() => setLogTimeModalOpen(false)}
+          projects={ttProjects}
+          onSaved={loadTimeTrackerData}
+          onShowToast={onShowToast}
+        />
       </div>
     );
   }

@@ -124,13 +124,13 @@ export default function AttendanceView({
     try {
       if (punchState.checkedIn) {
         await apiPost('/api/v1/workspace/attendance/clock-out', {
-          notes: 'Clocked out via Zoho People Attendance Summary View',
+          notes: 'Clocked out via Attendance Summary View',
         });
         onShowToast?.('Successfully punched out. Have a great evening!', 'success');
       } else {
         await apiPost('/api/v1/workspace/attendance/clock-in', {
           source: 'WEB_PORTAL',
-          notes: 'Clocked in via Zoho People Attendance Summary View',
+          notes: 'Clocked in via Attendance Summary View',
         });
         onShowToast?.('Successfully punched in. Have a productive day!', 'success');
       }

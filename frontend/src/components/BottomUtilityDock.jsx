@@ -207,7 +207,7 @@ export default function BottomUtilityDock({
                 NP
               </div>
               <div>
-                <h3 className="text-xs font-bold">Welcome to Zoho People Help widget</h3>
+                <h3 className="text-xs font-bold">HR Help & Support Center</h3>
                 <p className="text-[10px] text-slate-300">Ndakala Advisory Knowledge & Support</p>
               </div>
             </div>

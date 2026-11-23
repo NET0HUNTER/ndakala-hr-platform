@@ -19,7 +19,7 @@
 | **03** | **Onboarding (Candidate Hub)** | `[x]` | **P1** | 7-section Add Candidate modal with repeating tabular grids (Education, Experience, Dependents), draft auto-save persistence, 31-field filter drawer, and data scope dropdown. |
 | **04** | **Leave Tracker** | `[x]` | **P0** | Parity verified: Leave Summary List View, Monthly Calendar heat map, Shift & Schedules, Team Leave Queue, 8-type statutory/enhanced Apply Leave modal. |
 | **05** | **Attendance** | `[x]` | **P0** | Exact 9-column statutory attendance grid, live digital punch widget, display unit toggle (Hours/Days), Regularization request drawer, and Team Attendance Kanban. |
-| **06** | **Time Tracker** | `[~]` | **P1** | Split-button `Log Time` (Daily/Weekly/Monthly), Job Schedule 24-hr weekly grid, Client Rate Cards. |
+| **06** | **Time Tracker** | `[x]` | **P1** | Parity verified: Split-button `Log Time` (`Daily Log`, `Weekly Log`, `Semi Monthly Log`, `Monthly Log`), Time Entry Mode radios (`Total Hours`, `Start and End Time`, `Live Timer`), `Billable`/`Non-billable` toggle, Weekly & 24-hr `Job Schedule` grid (`Clone Week`, `Assign Job Shift`, `Publish Schedule`), Client Rate Cards & RBAC masking. |
 | **07** | **Performance & OKR** | `[~]` | **P1** | Sub-tabs `KRA`, `Competency`, `Skill Set Matrix` (Organization vs. Reportees rating grid). |
 | **08** | **Files Hub** | `[x]` | **P0** | Complete parity matching uploaded screenshot: `< Files`, Org Files, Employee Files, HR Templates, M365 dual-write. |
 | **09** | **Employee Information (Operations)** | `[x]` | **P0** | Parity verified: 4-step Add Employee wizard (Provisioning, Account Creation, Work Data, Alerts & Dispatch), 10-section Employee Profile schema with interactive tabular repeating rows (Work Experience, Education Details, Dependent Details), auto-computed Age from DOB, and AES-256 statutory vault masking. |
@@ -155,12 +155,13 @@
 ### P1.2 Time Tracker (`#timetracker`)
 - `[x]` Daily time entry and basic project assignment.
 - `[x]` Timesheet submission and manager signoff workflow.
-- `[~]` **Log Time Split-Button**:
-  - `[ ]` Modal switch: `Daily Log`, `Weekly Log`, `Semi Monthly Log`, `Monthly Log`.
-  - `[ ]` Time mode radio: `Total Hours`, `Start and End Time`, `Live Timer`.
-  - `[ ]` Billable flag: `Billable` vs. `Non-billable`.
-- `[~]` **Job Schedule Grid**:
-  - `[ ]` Weekly 24-hour visual schedule with shift allocation and publish status.
+- `[x]` **Log Time Split-Button**:
+  - `[x]` Modal switch: `Daily Log`, `Weekly Log`, `Semi Monthly Log`, `Monthly Log` (`LogTimeModal.jsx`).
+  - `[x]` Time mode radio: `Total Hours`, `Start and End Time`, `Live Timer`.
+  - `[x]` Billable flag: `Billable` vs. `Non-billable`.
+- `[x]` **Job Schedule Grid**:
+  - `[x]` Weekly & 24-hour (`00:00–23:00`) visual schedule (`JobScheduleGridView.jsx`) with shift allocation, `Clone Week`, and `Draft` → `Published` status.
+- `[x]` 4/4 passing Vitest tests in `tests/timetracker_parity.test.ts`.
 
 ### P1.3 Performance & OKR (`#performance` & `#okr`)
 - `[x]` Dynamic OKR cycle start month generator (e.g. `Jan` $\rightarrow$ `Q1-Jan-Mar...`).
