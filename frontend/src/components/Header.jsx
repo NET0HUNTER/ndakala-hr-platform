@@ -146,7 +146,8 @@ export default function Header({
         ];
       case 'engagement':
         return [
-          { id: 'engagement', label: 'Engagement & Surveys' },
+          { id: 'engagement', label: 'My Data' },
+          { id: 'surveys', label: 'Surveys & eNPS' },
           { id: 'ercases', label: 'Employee Relations & Policies' },
         ];
       case 'travel':

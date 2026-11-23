@@ -27,7 +27,7 @@
 | **11** | **HR Letters & Templates** | `[x]` | **P2** | Parity verified: Dedicated 3-tab HR Letters portal (`Address Proof`, `Bonafide Letter`, `Experience Letter`), request modal (`Submit Request` / `Save Draft`), inline HR Approve/Reject, and instant A4 PDF compilation & preview (`/api/v1/hr-letters/requests/:id/pdf`). |
 | **12** | **Travel & Expenses** | `[x]` | **P2** | Parity verified: Dual-tab `Travel Request` + `Travel Expense` reimbursement ledger (`TravelExpenseView.jsx`), client billability, cash advances, receipt/ETR references, and inline `Approve` / `Reject` / `Reimburse` workflow. |
 | **13** | **Tasks & Checklists** | `[x]` | **P2** | Parity verified: Standalone Tasks module (`TasksChecklistsView.jsx`) with `My Tasks`, `Track Tasks`, `All Tasks`, `Checklists`, status filters (`Total`, `Open`, `Completed`), List & 3-column Kanban Board, and Onboarding/Offboarding/Payroll milestone checklists. |
-| **14** | **Employee Engagement & Surveys** | `[ ]` | **P2** | Satisfaction surveys, pulse polls, eNPS metric tracking. |
+| **14** | **Employee Engagement & Surveys** | `[x]` | **P2** | Parity verified: `EmployeeEngagementView.jsx` with `My Data (Assigned Surveys)` and `Surveys & eNPS Dashboard`, live Firm eNPS / Satisfaction / Response KPIs, anonymous response collector, and `Launch Pulse Survey` modal. |
 | **15** | **Approvals (Operations)** | `[x]` | **P0** | Unified `#operations/approvals` dashboard with 17-service Operations Hub, status pills (`Pending`, `Active`), multi-select batch actions, Request Details Drawer, and M365 event sync. |
 | **16** | **Reports Catalogue (47+ Reports)** | `[~]` | **P2** | Categorized reports explorer, Muster Roll, Presence Hours Breakup, Nine-Box Matrix, statutory exports. |
 | **17** | **Settings & Administration** | `[x]` | **P1** | Parity verified: 19-service administrative card directory (`SettingsServicesHub.jsx`) with search, category filters, Active/Paused toggles, direct navigation, plus `Automation & Blueprints` engine (Workflows, Blueprints, Zero-PII Email Alerts & Webhooks). |
@@ -217,8 +217,9 @@
 - `[x]` Passing Vitest test in `tests/tasks_checklists_parity.test.ts`.
 
 ### P2.4 Employee Engagement & Surveys (`#employeeengagement`)
-- `[ ]` Sub-tabs: `My Data` (Assigned surveys), `Surveys` (eNPS, pulse questionnaires).
-- `[ ]` Anonymous response collector with score dashboard.
+- `[x]` Sub-tabs: `My Data` (Assigned surveys), `Surveys & eNPS` (`EmployeeEngagementView.jsx` + `Header.jsx`).
+- `[x]` Anonymous response collector (`/api/v1/workspace/surveys/:id/respond`) with live Firm eNPS & satisfaction score dashboard.
+- `[x]` Passing Vitest test in `tests/engagement_parity.test.ts`.
 
 ### P2.5 Reports Catalogue (47+ Standard Reports)
 - `[x]` Reports framework with CSV, XLSX, and PDF export.

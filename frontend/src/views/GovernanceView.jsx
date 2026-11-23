@@ -5,6 +5,7 @@ import LogTimeModal from './modals/LogTimeModal';
 import HrLettersPortalView from './HrLettersPortalView';
 import TravelExpenseView from './TravelExpenseView';
 import TasksChecklistsView from './TasksChecklistsView';
+import EmployeeEngagementView from './EmployeeEngagementView';
 import FilesView from './FilesView';
 import InlineDocumentViewerModal from './modals/InlineDocumentViewerModal';
 import {
@@ -2195,8 +2196,20 @@ export default function GovernanceView({
     );
   }
 
-  // ==================== RENDER 2C: EMPLOYEE ENGAGEMENT PULSE SURVEYS ====================
-  if (activeTab === 'engagement' || subViewHint === 'engagement') {
+  // ==================== RENDER 2C: EMPLOYEE ENGAGEMENT & eNPS SURVEYS ====================
+  if ((activeTab === 'engagement' || subViewHint === 'engagement') && topContextTab !== 'ercases') {
+    return (
+      <EmployeeEngagementView
+        topContextTab={topContextTab}
+        setTopContextTab={setTopContextTab}
+        currentUser={currentUser}
+        onShowToast={onShowToast}
+      />
+    );
+  }
+
+  // Legacy engagement fallback:
+  if (false && (activeTab === 'engagement' || subViewHint === 'engagement')) {
     return (
       <div className="flex flex-col h-full bg-[#edf1f7] p-5 overflow-y-auto space-y-4 text-xs">
         <div className="bg-white rounded-md border border-slate-200 p-5 space-y-4">
