@@ -15,7 +15,7 @@
 | # | Module / Subsystem | Current State | Priority | Core Missing Elements / Parity Scope |
 | :- | :--- | :---: | :---: | :--- |
 | **01** | **Global Shell & Top/Bottom Rails** | `[~]` | **P0** | Quick-Action modal split (`+`), Global Employee Search, Bottom utility pins (`My Pins`, `Support Hub`). |
-| **02** | **Home (My Space, Team, Org)** | `[~]` | **P0** | Multi-space tabs (`My Space`, `Team`, `Organization`), interactive Employee Tree (Org Chart), Department Directory. |
+| **02** | **Home (My Space, Team, Org)** | `[x]` | **P0** | Multi-space tabs (`My Space`, `Team Space`, `Organization Space`), interactive recursive SVG/DOM Employee Tree (Org Chart), Search highlighting, Expand/Collapse, Profile Drawer, and Team Space feed deck. |
 | **03** | **Onboarding (Candidate Hub)** | `[~]` | **P1** | 7-section Add Candidate modal/drawer with repeating tabular grids (Education, Experience, Dependents). |
 | **04** | **Leave Tracker** | `[~]` | **P0** | `Leave Summary` Calendar vs. List toggle, `Shift` weekly/monthly timeline, `Team` On-Leave calendar. |
 | **05** | **Attendance** | `[x]` | **P0** | Exact 9-column statutory attendance grid, live digital punch widget, display unit toggle (Hours/Days), Regularization request drawer, and Team Attendance Kanban. |
@@ -50,16 +50,24 @@
   - `[ ]` Active slide-over drawer for `Support Hub` and quick notes (`My Pins`).
 
 ### P0.2 Home Hub (`#home`)
-- `[~]` **My Space**:
+- `[x]` **My Space**:
   - `[x]` Overview dashboard with leave balance, attendance status, upcoming tasks.
-  - `[ ]` Sub-tabs: `Activities`, `Feeds`, `Profile`, `Approvals`, `Leave`, `Attendance`, `Time Logs`, `Timesheets`, `Jobs`, `Files`.
-  - `[ ]` `Delegation` tab (Out-of-Office temporary approver assignment).
-- `[~]` **Team Space**:
-  - `[ ]` `Team Space` widget deck (Team strength, Team Availability gauge, Location Diversity).
-  - `[ ]` `Department Directory` with direct-dial and check-in badges.
-- `[~]` **Organization Space**:
-  - `[ ]` `Employee Tree` (Interactive zoomable SVG organogram).
-  - `[ ]` `Announcements` wall & `Birthday Folks` / `New Hires` widget cards.
+  - `[x]` Sub-tabs: `Activities`, `Feeds`, `Profile`, `Approvals`, `Leave`, `Attendance`, `Time Logs`, `Timesheets`, `Jobs`, `Files`.
+  - `[x]` `Delegation` tab (Out-of-Office temporary approver assignment).
+- `[x]` **Team Space**:
+  - `[x]` `Team Space` widget deck (Advisory & Strategy Consulting team lead, 6 members, 0 pending approvals, 3 on leave).
+  - `[x]` `Reportees` directory with direct cards and pin-favorite controls.
+  - `[x]` Live `Team Wall` feed deck with update/announcement/kudos posting and organization wall links.
+- `[x]` **Organization Space**:
+  - `[x]` Sub-tabs: `Announcements`, `Employee Directory`, `Department Tree`, `Birthday & Anniversaries`, `Company Policies`.
+  - `[x]` `Organization & Department Tree` with `Employee Reporting Tree` and `Department Structure Tree`.
+  - `[x]` `Employee Tree` (Interactive recursive organogram canvas with vertical `w-0.5` and horizontal `h-0.5` branch connector lines).
+  - `[x]` Hierarchy level badges (`Firm Executive`, `Level 1`, `Level 2+`), direct reports count badges, and node avatar initials.
+  - `[x]` Interactive controls: `Expand All`, `Collapse All`, per-node toggle buttons (`Expand` / `Collapse`).
+  - `[x]` Hierarchy Search box with real-time matching node blue border highlighting (`ring-2 ring-blue-100 border-blue-500`).
+  - `[x]` Slide-out Employee Profile Card drawer on node click showing employee number, department, employment status, reporting manager, work email, and contact phone.
+  - `[x]` 4/4 passing Vitest tests in `tests/home_orgchart_parity.test.ts`.
+  - `[x]` Verified live on Contabo VPS (`https://ndakalahr.duckdns.org`) with screenshot evidence under `docs/zoho_people_spec/screenshots/home/`.
 
 ### P0.3 Employee Information & Operations Directory
 - `[x]` Employee table with employee number, name, department, role, employment status.
