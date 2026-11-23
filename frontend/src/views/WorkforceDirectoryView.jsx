@@ -2903,7 +2903,7 @@ export default function WorkforceDirectoryView({
           }
         }}
         employees={employees}
-        departments={catCatalog}
+        departments={departments}
         onShowToast={notify}
       />
 
