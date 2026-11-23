@@ -1,3 +1,4 @@
+import { describe, it, expect, beforeAll } from 'vitest';
 import { getApp, prisma, loginClient } from './helpers.js';
 import { seedDatabase } from '../src/seed.js';
 
@@ -110,5 +111,67 @@ describe('Candidate Onboarding Hub & OKR Configuration Parity', () => {
 
     const domain = orgRes.body.data.email.split('@')[1];
     expect(domain).toBeDefined();
+  });
+
+  it('Scenario 5: 7-Section Candidate Modal repeating grids (Education, Experience, Dependents) draft persistence', async () => {
+    const hr = await loginClient(app, 'hr.lead@ndakalaadvisory.co.ke');
+
+    const draftPayload = {
+      firstName: 'Faith',
+      lastName: 'Mutua',
+      personalEmail: 'faith.mutua@example.com',
+      workEmail: 'faith.mutua@ndakalaadvisory.co.ke',
+      department: 'Advisory & Strategy Consulting',
+      educationRows: [
+        {
+          school: 'University of Nairobi',
+          degree: 'Bachelor of Economics',
+          field: 'Economics & Statistics',
+          completionDate: '2022-11-20',
+          notes: 'First Class Honours',
+        },
+      ],
+      experienceRows: [
+        {
+          occupation: 'Financial Analyst',
+          company: 'Acme Advisory Kenya',
+          summary: 'Led valuation models and equity research',
+          duration: '2 Years',
+          fromDate: '2023-01-10',
+          toDate: '2025-01-15',
+        },
+      ],
+      dependentRows: [
+        {
+          name: 'Lucas Mutua',
+          relationship: 'Child',
+          dob: '2024-05-12',
+        },
+      ],
+      updatedAt: new Date().toISOString(),
+    };
+
+    const putRes = await hr.agent
+      .put('/api/v1/workspace/ui-config')
+      .set('x-csrf-token', hr.csrfToken)
+      .send({
+        key: 'CANDIDATE_DRAFT',
+        scope: 'USER',
+        value: draftPayload,
+      });
+
+    expect(putRes.status).toBe(200);
+
+    const getRes = await hr.agent.get('/api/v1/workspace/ui-config?key=CANDIDATE_DRAFT');
+    expect(getRes.status).toBe(200);
+    const savedDraft = getRes.body.data.configs.CANDIDATE_DRAFT;
+    expect(savedDraft).toBeDefined();
+    expect(savedDraft.firstName).toBe('Faith');
+    expect(savedDraft.educationRows.length).toBe(1);
+    expect(savedDraft.educationRows[0].school).toBe('University of Nairobi');
+    expect(savedDraft.experienceRows.length).toBe(1);
+    expect(savedDraft.experienceRows[0].company).toBe('Acme Advisory Kenya');
+    expect(savedDraft.dependentRows.length).toBe(1);
+    expect(savedDraft.dependentRows[0].relationship).toBe('Child');
   });
 });
