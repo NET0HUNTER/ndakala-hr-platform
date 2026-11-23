@@ -26,6 +26,7 @@ import {
   NdakalaEmptyState,
 } from '../components/Icons';
 import { apiGet, apiPost, apiPatch, apiPut, apiDelete, unwrapList } from '../utils/api';
+import InteractiveOrgChart from '../components/InteractiveOrgChart';
 
 const MORE_OVERVIEW_TABS = [
   { id: 'leave', label: 'Leave' },
@@ -3400,46 +3401,10 @@ export default function MyWorkspaceView({
                   </div>
 
                   {orgTreeMode === 'employee' ? (
-                    <div className="bg-white rounded-md border border-slate-200 p-6 space-y-6">
-                      {rootLeaders.length === 0 ? (
-                        <p className="text-xs text-slate-400 text-center py-8">No employee reporting nodes found.</p>
-                      ) : (
-                        rootLeaders.map((leader) => {
-                          const directChildren = employees.filter((e) => e.managerId === leader.id);
-                          return (
-                            <div key={leader.id} className="border border-slate-200 rounded-lg p-4 bg-slate-50/40">
-                              <div className="inline-flex items-center gap-3 px-4 py-3 rounded-lg bg-[#191f3a] text-white shadow-sm">
-                                <div className="w-9 h-9 rounded-full bg-[#0088ff] font-bold text-xs flex items-center justify-center">
-                                  {getEmpInitials(getEmpName(leader))}
-                                </div>
-                                <div className="text-xs">
-                                  <p className="font-semibold">{getEmpName(leader)}</p>
-                                  <p className="text-[11px] text-slate-300">
-                                    {getEmpTitle(leader)} • {getEmpDept(leader)}
-                                  </p>
-                                </div>
-                              </div>
-                              {directChildren.length > 0 && (
-                                <div className="mt-4 pl-6 border-l-2 border-blue-200 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                  {directChildren.map((child) => (
-                                    <div key={child.id} className="p-3 rounded-md bg-white border border-slate-200 text-xs flex items-center gap-2.5">
-                                      <div className="w-8 h-8 rounded-md bg-blue-50 text-[#0088ff] font-bold text-[11px] flex items-center justify-center flex-shrink-0">
-                                        {getEmpInitials(getEmpName(child))}
-                                      </div>
-                                      <div className="min-w-0">
-                                        <p className="font-semibold text-slate-800 truncate">{getEmpName(child)}</p>
-                                        <p className="text-[11px] text-slate-500 truncate">{getEmpTitle(child)}</p>
-                                        <p className="text-[10px] text-slate-400 truncate">{getEmpDept(child)}</p>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
+                    <InteractiveOrgChart
+                      employees={employees}
+                      departments={orgDepartments}
+                    />
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                       {uniqueDeptNames.map((dName) => {
