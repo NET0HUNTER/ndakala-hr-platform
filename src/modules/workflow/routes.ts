@@ -258,7 +258,7 @@ export function createWorkflowRouter(deps: AppDeps): Router {
           lastName: true,
           status: true,
           department: { select: { name: true } },
-          designation: { select: { name: true } },
+          position: { select: { title: true } },
         },
       });
       const empMap = new Map(employees.map((e) => [e.userId as string, e]));
@@ -290,7 +290,7 @@ export function createWorkflowRouter(deps: AppDeps): Router {
                 workEmail: true,
                 status: true,
                 department: { select: { name: true } },
-                designation: { select: { name: true } },
+                position: { select: { title: true } },
               },
             },
             leaveType: {
@@ -331,7 +331,7 @@ export function createWorkflowRouter(deps: AppDeps): Router {
               name: initiator?.name || `${emp?.firstName || ''} ${emp?.lastName || ''}`.trim() || initiator?.email || 'User',
               email: initiator?.email || '',
               departmentName: emp?.department?.name || 'Administration',
-              designationName: emp?.designation?.name || 'Authorized Officer',
+              designationName: (emp as any)?.position?.title || 'Authorized Officer',
             },
             submittedAt: t.createdAt.toISOString(),
             dueDate: t.dueDate ? t.dueDate.toISOString() : null,
@@ -386,7 +386,7 @@ export function createWorkflowRouter(deps: AppDeps): Router {
             name: `${lr.employee?.firstName || ''} ${lr.employee?.lastName || ''}`.trim(),
             email: lr.employee?.workEmail || '',
             departmentName: lr.employee?.department?.name || 'Advisory',
-            designationName: lr.employee?.designation?.name || 'Associate',
+            designationName: (lr.employee as any)?.position?.title || 'Associate',
           },
           submittedAt: lr.submittedAt.toISOString(),
           dueDate: new Date(lr.submittedAt.getTime() + 48 * 3600 * 1000).toISOString(),
