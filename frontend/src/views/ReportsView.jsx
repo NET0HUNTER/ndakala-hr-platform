@@ -19,8 +19,10 @@ import {
   NdakalaEmptyState,
 } from '../components/Icons';
 import { apiGet, apiPut, apiDownload } from '../utils/api';
+import ReportsCataloguePanel from './ReportsCataloguePanel';
 
 const REPORT_DOMAINS = [
+  { id: 'catalogue', label: '50-Report Catalogue', icon: FileText },
   { id: 'summary', label: 'Executive Summary', icon: Activity },
   { id: 'timetracker', label: 'Timesheet & Profitability', icon: Clock },
   { id: 'workforce', label: 'Workforce & Career', icon: Users },
@@ -57,6 +59,10 @@ export default function ReportsView({
   });
 
   const loadReport = useCallback(async () => {
+    if (activeDomain === 'catalogue') {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const qs = new URLSearchParams({ scope, startDate, endDate, search }).toString();
@@ -328,6 +334,18 @@ export default function ReportsView({
           <div className="bg-white rounded-md border border-slate-200 p-8 text-center text-slate-500">
             Generating live report from database...
           </div>
+        )}
+
+        {/* 0. COMPLETE 50-REPORT STANDARD CATALOGUE */}
+        {!loading && activeDomain === 'catalogue' && (
+          <ReportsCataloguePanel
+            onOpenDomain={(target) => {
+              setDomainData(null);
+              setActiveDomain(target);
+            }}
+            onExportDomain={(target) => handleExportCsv(target)}
+            onShowToast={onShowToast}
+          />
         )}
 
         {/* 1. EXECUTIVE SUMMARY */}

@@ -29,7 +29,7 @@
 | **13** | **Tasks & Checklists** | `[x]` | **P2** | Parity verified: Standalone Tasks module (`TasksChecklistsView.jsx`) with `My Tasks`, `Track Tasks`, `All Tasks`, `Checklists`, status filters (`Total`, `Open`, `Completed`), List & 3-column Kanban Board, and Onboarding/Offboarding/Payroll milestone checklists. |
 | **14** | **Employee Engagement & Surveys** | `[x]` | **P2** | Parity verified: `EmployeeEngagementView.jsx` with `My Data (Assigned Surveys)` and `Surveys & eNPS Dashboard`, live Firm eNPS / Satisfaction / Response KPIs, anonymous response collector, and `Launch Pulse Survey` modal. |
 | **15** | **Approvals (Operations)** | `[x]` | **P0** | Unified `#operations/approvals` dashboard with 17-service Operations Hub, status pills (`Pending`, `Active`), multi-select batch actions, Request Details Drawer, and M365 event sync. |
-| **16** | **Reports Catalogue (47+ Reports)** | `[~]` | **P2** | Categorized reports explorer, Muster Roll, Presence Hours Breakup, Nine-Box Matrix, statutory exports. |
+| **16** | **Reports Catalogue (47+ Reports)** | `[x]` | **P2** | Parity verified: `ReportsCataloguePanel.jsx` indexing all 50 categorized enterprise reports across 8 domains (Employee Info, Leave, Attendance, Time Tracker, Performance, Files, Compensation, OKR) with live search, filter pills, `Open Report`, and live CSV exports. |
 | **17** | **Settings & Administration** | `[x]` | **P1** | Parity verified: 19-service administrative card directory (`SettingsServicesHub.jsx`) with search, category filters, Active/Paused toggles, direct navigation, plus `Automation & Blueprints` engine (Workflows, Blueprints, Zero-PII Email Alerts & Webhooks). |
 
 ---
@@ -224,15 +224,16 @@
 ### P2.5 Reports Catalogue (47+ Standard Reports)
 - `[x]` Reports framework with CSV, XLSX, and PDF export.
 - `[x]` Headcount, payroll summary, statutory tax report, leave balances.
-- `[ ]` 47+ categorized reports matching Zoho People:
-  - *Employee Information (8 reports)*: Headcount, Addition Trend, Attrition Trend, Career History, Distribution, Diversity, Exit Analysis.
-  - *Leave Tracker (8 reports)*: Daily Leave Status, Resource Availability, Leave Data for Payroll, Loss of Pay Details.
-  - *Attendance (7 reports)*: Muster Roll, Daily Attendance Status, Presence Hours Breakup, Consecutive Absences.
-  - *Time Tracker (7 reports)*: Jobs Status, Projects Status, Scheduled vs. Worked Hours, Timesheet Data for Payroll.
-  - *Performance (11 reports)*: Nine-Box Matrix, Appraisal Ratings History, Score & Rating Summary, Feedback on Appraisal.
-  - *Files (2 reports)*: Policy Acknowledgement Receipts, Consent Receipts.
-  - *Compensation (5 reports)*: Salary Distribution, Compensation Trend, Salary Revision History.
-  - *OKR (2 reports)*: Objectives Progress, Key Results Variance.
+- `[x]` 50 categorized reports (`ReportsCataloguePanel.jsx`) across all 8 domains:
+  - *Employee Information (8 reports)*: Headcount Summary, Addition Trend, Attrition Trend, Career History, Department Distribution, Workforce Diversity, Exit Analysis, Probation & Tenure Tracker.
+  - *Leave Tracker (8 reports)*: Daily Leave Status, Resource Availability, Leave Data for Payroll, Loss of Pay Details, Leave Balance Ledger, Carry-Over Expiry, Relieving Officer Coverage, Holiday Calendar Impact.
+  - *Attendance (7 reports)*: Muster Roll, Daily Attendance Status, Presence Hours Breakup, Consecutive Absences, Late Arrival & Early Out, Overtime & Deviation, Regularization Audit Trail.
+  - *Time Tracker (7 reports)*: Jobs Status, Projects Status, Scheduled vs. Worked Hours, Timesheet Data for Payroll, Billable Utilization, Budget Burn & Leakage, Client Rate Card Realization.
+  - *Performance (11 reports)*: Nine-Box Matrix, Appraisal Ratings History, Score & Rating Summary, Feedback on Appraisal, KRA Attainment, Competency Gap, Skill Set Matrix, Goal Sheet Completion, PIP Outcome, Development Plan Progress, 360 Feedback Digest.
+  - *Files (2 reports)*: Policy Acknowledgement Receipts, Consent & Vault Receipts.
+  - *Compensation (5 reports)*: Salary Distribution, Current Salary Register, Compensation Trend, Salary Revision History, Kenyan Statutory Deductions (PAYE / NSSF / SHIF / AHL).
+  - *OKR (2 reports)*: Objectives Progress Summary, Key Results Variance & Deviation.
+- `[x]` Passing Vitest test in `tests/reports_catalogue_parity.test.ts`.
 
 ---
 
