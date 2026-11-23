@@ -522,6 +522,28 @@ export const Info = createIcon(
   </>
 );
 
+export const Pin = createIcon(
+  <>
+    <line x1="12" y1="17" x2="12" y2="22" />
+    <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a1 1 0 0 0 0-2H8a1 1 0 0 0 0 2h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
+  </>
+);
+
+export const MessageSquare = createIcon(
+  <>
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+  </>
+);
+
+export const Trash2 = createIcon(
+  <>
+    <polyline points="3 6 5 6 21 6" />
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    <line x1="10" y1="11" x2="10" y2="17" />
+    <line x1="14" y1="11" x2="14" y2="17" />
+  </>
+);
+
 export function NdakalaEmptyState({ title, subtitle, actionLabel, onAction, variant = 'default' }) {
   return (
     <div className="flex flex-col items-center justify-center py-12 px-4 text-center select-none">
@@ -652,6 +674,9 @@ export const Icons = {
   Scale,
   FileCheck,
   Info,
+  Pin,
+  MessageSquare,
+  Trash2,
 };
 
 export default Icons;
