@@ -13,7 +13,6 @@ import {
   ChevronDown,
   CheckCircle,
   XCircle,
-  RotateCcw,
   Shield,
   Layers,
   ArrowRight,
@@ -176,7 +175,7 @@ export default function OperationsApprovalsView({
       case 'RETURNED':
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-            <RotateCcw size={12} className="text-blue-600 stroke-[2.5]" />
+            <RefreshCw size={12} className="text-blue-600 stroke-[2.5]" />
             Returned for Edit
           </span>
         );
