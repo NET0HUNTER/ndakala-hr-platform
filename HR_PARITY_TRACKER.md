@@ -28,7 +28,7 @@
 | **12** | **Travel & Expenses** | `[ ]` | **P2** | Travel Request form, Travel Expense reimbursement ledger, billable-to-client approvals. |
 | **13** | **Tasks & Checklists** | `[~]` | **P2** | Dedicated task boards, checklist tracking against onboarding and operational milestones. |
 | **14** | **Employee Engagement & Surveys** | `[ ]` | **P2** | Satisfaction surveys, pulse polls, eNPS metric tracking. |
-| **15** | **Approvals (Operations)** | `[~]` | **P0** | Unified `#operations/approvals` dashboard with status pills (`Pending`, `Active`) and multi-select actions. |
+| **15** | **Approvals (Operations)** | `[x]` | **P0** | Unified `#operations/approvals` dashboard with 17-service Operations Hub, status pills (`Pending`, `Active`), multi-select batch actions, Request Details Drawer, and M365 event sync. |
 | **16** | **Reports Catalogue (47+ Reports)** | `[~]` | **P2** | Categorized reports explorer, Muster Roll, Presence Hours Breakup, Nine-Box Matrix, statutory exports. |
 | **17** | **Settings & Administration** | `[~]` | **P1** | 19-service administrative card grid, Custom Services builder, granular Role-Based Access Control matrix. |
 
@@ -105,10 +105,15 @@
 
 ### P0.6 Operations Approvals Hub (`#operations/approvals`)
 - `[x]` Multi-stage maker-checker approval engine.
-- `[~]` **Unified Operations Approvals View**:
-  - `[ ]` Top tab: `All Approvals`.
-  - `[ ]` Quick filter pills: `Status : Pending`, `Employee Status : All Active`.
-  - `[ ]` Batch actions: `Approve Selected`, `Reject Selected`, `Reassign Approver`.
+- `[x]` **Unified Operations Approvals View**:
+  - `[x]` 17-service card Operations Hub grid matching Zoho People `#operations/home` with dynamic pending approvals badge.
+  - `[x]` Top sub-tabs: `All Approvals`, `Pending ( n )`, `Approved ( n )`.
+  - `[x]` Quick filter pills: `Status : Pending / All Statuses`, `Employee Status : All Active / All Requests`, `Type : All Types`.
+  - `[x]` Full 8-column tabular grid: `Checkbox`, `Request Info`, `Employee`, `Submitted On`, `Stage / Approver`, `Status`, `SLA / Due`, `Actions`.
+  - `[x]` Batch actions: `Approve Selected`, `Reject Selected`, select-all header toggle.
+  - `[x]` Slide-out Request Details Drawer with request audit details and M365 App-Only Sync informational notice.
+  - `[x]` Zero dead buttons, zero console/network errors, 4/4 passing Vitest tests in `tests/operations_approvals.test.ts`.
+  - `[x]` Verified live on Contabo VPS (`https://ndakalahr.duckdns.org`) with screenshot evidence under `docs/zoho_people_spec/screenshots/operations_approvals/`.
 
 ---
 
