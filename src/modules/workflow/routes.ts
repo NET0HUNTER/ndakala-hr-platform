@@ -207,8 +207,8 @@ export function createWorkflowRouter(deps: AppDeps): Router {
     }),
     handler: async ({ query, auth, deps }) => {
       const isSuperAdmin = auth.roles.includes('managing_partner') || auth.roles.includes('head_of_hr') || auth.roles.includes('operations_director');
-      const canApproveLeave = auth.permissions?.includes('leave.approve') || isSuperAdmin;
-      const canApproveConfig = auth.permissions?.includes('config.approve') || isSuperAdmin;
+      const canApproveLeave = (auth.permissions && typeof auth.permissions.has === 'function' ? auth.permissions.has('leave.approve') : false) || isSuperAdmin;
+      const canApproveConfig = (auth.permissions && typeof auth.permissions.has === 'function' ? auth.permissions.has('config.approve') : false) || isSuperAdmin;
 
       // 6a. Query Workflow Tasks
       const workflowTaskWhere: any = {};
@@ -244,20 +244,24 @@ export function createWorkflowRouter(deps: AppDeps): Router {
           id: true,
           name: true,
           email: true,
-          employee: {
-            select: {
-              id: true,
-              employeeNumber: true,
-              firstName: true,
-              lastName: true,
-              employmentStatus: true,
-              department: { select: { name: true } },
-              designation: { select: { name: true } },
-            },
-          },
         },
       });
       const userMap = new Map(initiatorUsers.map((u) => [u.id, u]));
+
+      const employees = await deps.prisma.employee.findMany({
+        where: { userId: { in: initiatorIds } },
+        select: {
+          id: true,
+          userId: true,
+          employeeNumber: true,
+          firstName: true,
+          lastName: true,
+          status: true,
+          department: { select: { name: true } },
+          designation: { select: { name: true } },
+        },
+      });
+      const empMap = new Map(employees.map((e) => [e.userId as string, e]));
 
       // 6b. Query Leave Requests
       const leaveWhere: any = {};
@@ -268,44 +272,44 @@ export function createWorkflowRouter(deps: AppDeps): Router {
         else if (query.status === 'RETURNED') leaveWhere.status = 'RETURNED_FOR_EDIT';
       }
       if (query.employeeStatus === 'ACTIVE') {
-        leaveWhere.employee = { employmentStatus: 'ACTIVE' };
+        leaveWhere.employee = { status: 'ACTIVE' };
       }
 
       // If user is line manager or HR, show requests they have access to
-      const leaveRequests = (query.module === 'ALL' || query.module === 'LEAVE')
-        ? await deps.prisma.leaveRequest.findMany({
-            where: leaveWhere,
-            include: {
-              employee: {
-                select: {
-                  id: true,
-                  employeeNumber: true,
-                  firstName: true,
-                  lastName: true,
-                  workEmail: true,
-                  employmentStatus: true,
-                  department: { select: { name: true } },
-                  designation: { select: { name: true } },
-                },
-              },
-              leaveType: {
-                select: { id: true, code: true, name: true, category: true },
+      let leaveRequests: any[] = [];
+      if (query.module === 'ALL' || query.module === 'LEAVE') {
+        leaveRequests = await (deps.prisma.leaveRequest as any).findMany({
+          where: leaveWhere,
+          include: {
+            employee: {
+              select: {
+                id: true,
+                employeeNumber: true,
+                firstName: true,
+                lastName: true,
+                workEmail: true,
+                status: true,
+                department: { select: { name: true } },
+                designation: { select: { name: true } },
               },
             },
-            orderBy: { submittedAt: 'desc' },
-          })
-        : [];
+            leaveType: {
+              select: { id: true, code: true, name: true, category: true },
+            },
+          },
+          orderBy: { submittedAt: 'desc' },
+        });
+      }
 
-      // Fetch all active employees for count resolution
       const unifiedItems: any[] = [];
 
       // Map workflow tasks
       if (query.module === 'ALL' || query.module === 'CONFIG') {
         for (const t of tasks) {
           const initiator = userMap.get(t.instance.initiatorUserId);
-          const emp = initiator?.employee;
+          const emp = empMap.get(t.instance.initiatorUserId);
 
-          if (query.employeeStatus === 'ACTIVE' && emp && emp.employmentStatus !== 'ACTIVE') {
+          if (query.employeeStatus === 'ACTIVE' && emp && emp.status !== 'ACTIVE') {
             continue;
           }
 
@@ -371,25 +375,25 @@ export function createWorkflowRouter(deps: AppDeps): Router {
           id: lr.id,
           source: 'LEAVE',
           requestId: lr.requestNumber,
-          title: `Leave Application - ${lr.leaveType.name} (${lr.workingDaysDeducted} Day${lr.workingDaysDeducted === 1 ? '' : 's'})`,
+          title: `Leave Application - ${lr.leaveType?.name || 'Leave'} (${lr.workingDaysDeducted} Day${lr.workingDaysDeducted === 1 ? '' : 's'})`,
           module: 'LEAVE',
           stageTitle: 'Line Manager & HR Review',
           initiator: {
-            id: lr.employee.id,
-            employeeNumber: lr.employee.employeeNumber,
-            firstName: lr.employee.firstName,
-            lastName: lr.employee.lastName,
-            name: `${lr.employee.firstName} ${lr.employee.lastName}`,
-            email: lr.employee.workEmail,
-            departmentName: lr.employee.department?.name || 'Advisory',
-            designationName: lr.employee.designation?.name || 'Associate',
+            id: lr.employee?.id || lr.employeeId,
+            employeeNumber: lr.employee?.employeeNumber || 'NDA',
+            firstName: lr.employee?.firstName || 'Employee',
+            lastName: lr.employee?.lastName || '',
+            name: `${lr.employee?.firstName || ''} ${lr.employee?.lastName || ''}`.trim(),
+            email: lr.employee?.workEmail || '',
+            departmentName: lr.employee?.department?.name || 'Advisory',
+            designationName: lr.employee?.designation?.name || 'Associate',
           },
           submittedAt: lr.submittedAt.toISOString(),
           dueDate: new Date(lr.submittedAt.getTime() + 48 * 3600 * 1000).toISOString(),
           status: statusNormalized,
           details: {
-            leaveTypeCode: lr.leaveType.code,
-            leaveTypeName: lr.leaveType.name,
+            leaveTypeCode: lr.leaveType?.code,
+            leaveTypeName: lr.leaveType?.name,
             startDate: lr.startDate.toISOString().split('T')[0],
             endDate: lr.endDate.toISOString().split('T')[0],
             calendarDays: lr.calendarDays,
@@ -501,7 +505,7 @@ export function createWorkflowRouter(deps: AppDeps): Router {
           action: `OPERATIONS_APPROVALS_BATCH_${body.action}`,
           targetType: 'ApprovalBatch',
           targetId: successfulIds.join(','),
-          outcome: successfulIds.length > 0 ? 'SUCCESS' : 'FAILED',
+          outcome: successfulIds.length > 0 ? ('SUCCESS' as const) : ('FAILURE' as const),
           after: { count: successfulIds.length, action: body.action },
         },
       );
