@@ -15,6 +15,12 @@ import {
 } from '../components/Icons';
 import { apiGet, apiPost, apiPut, apiPatch, unwrapList } from '../utils/api';
 import OkrConfigurationView from './OkrConfigurationView';
+import {
+  KraWeightingPanel,
+  SkillSetMatrixPanel,
+  CompetencyFrameworkPanel,
+  ProvideFeedbackDrawer,
+} from './PerformanceParityPanels';
 
 const PERF_SETTINGS_TABS = [
   { id: 'methods', label: 'Performance Methods' },
@@ -71,7 +77,8 @@ export default function PerformanceView({
     permSet.has('config.create') || permSet.has('config.manage') || canManageCycles;
   const actorEmployeeId = currentUser?.employeeId || '';
 
-  const [opsSubTab, setOpsSubTab] = useState('appraisals'); // appraisals | objectives | cycles | pip | development
+  const [opsSubTab, setOpsSubTab] = useState('appraisals'); // appraisals | objectives | kra | competency | skillset | cycles | pip | development
+  const [feedbackDrawerOpen, setFeedbackDrawerOpen] = useState(false);
   const [ratingScales, setRatingScales] = useState([]);
   const [objectiveSets, setObjectiveSets] = useState([]);
   const [devActions, setDevActions] = useState([]);
@@ -690,6 +697,9 @@ export default function PerformanceView({
             {[
               { id: 'appraisals', label: `Appraisals (${appraisals.length})` },
               { id: 'objectives', label: `Goal Sheets & OKRs (${objectiveSets.length})` },
+              { id: 'kra', label: 'KRA' },
+              { id: 'competency', label: 'Competency' },
+              { id: 'skillset', label: 'Skill Set Matrix' },
               { id: 'cycles', label: `Cycles & Formula (${performanceCycles.length})` },
               { id: 'pip', label: `PIPs (${pips.length})` },
               { id: 'development', label: `Development (${devActions.length})` },
@@ -710,6 +720,13 @@ export default function PerformanceView({
                 {t.label}
               </button>
             ))}
+            <button
+              type="button"
+              onClick={() => setFeedbackDrawerOpen(true)}
+              className="px-3.5 py-1.5 bg-[#191f3a] hover:bg-slate-800 text-white font-medium rounded"
+            >
+              Provide Feedback
+            </button>
             {canSelfSubmitObj && (
               <button
                 type="button"
@@ -1670,6 +1687,26 @@ export default function PerformanceView({
             </div>
           </div>
         )}
+
+        {opsSubTab === 'kra' && <KraWeightingPanel onShowToast={notify} />}
+
+        {opsSubTab === 'competency' && <CompetencyFrameworkPanel onShowToast={notify} />}
+
+        {opsSubTab === 'skillset' && (
+          <SkillSetMatrixPanel
+            employees={employees}
+            currentUser={currentUser}
+            onShowToast={notify}
+          />
+        )}
+
+        <ProvideFeedbackDrawer
+          isOpen={feedbackDrawerOpen}
+          onClose={() => setFeedbackDrawerOpen(false)}
+          employees={employees}
+          currentUser={currentUser}
+          onShowToast={notify}
+        />
 
         {/* Appraisal & PIP Action Modal */}
         {actionModal && (

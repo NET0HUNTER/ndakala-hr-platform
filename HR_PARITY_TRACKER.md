@@ -20,7 +20,7 @@
 | **04** | **Leave Tracker** | `[x]` | **P0** | Parity verified: Leave Summary List View, Monthly Calendar heat map, Shift & Schedules, Team Leave Queue, 8-type statutory/enhanced Apply Leave modal. |
 | **05** | **Attendance** | `[x]` | **P0** | Exact 9-column statutory attendance grid, live digital punch widget, display unit toggle (Hours/Days), Regularization request drawer, and Team Attendance Kanban. |
 | **06** | **Time Tracker** | `[x]` | **P1** | Parity verified: Split-button `Log Time` (`Daily Log`, `Weekly Log`, `Semi Monthly Log`, `Monthly Log`), Time Entry Mode radios (`Total Hours`, `Start and End Time`, `Live Timer`), `Billable`/`Non-billable` toggle, Weekly & 24-hr `Job Schedule` grid (`Clone Week`, `Assign Job Shift`, `Publish Schedule`), Client Rate Cards & RBAC masking. |
-| **07** | **Performance & OKR** | `[~]` | **P1** | Sub-tabs `KRA`, `Competency`, `Skill Set Matrix` (Organization vs. Reportees rating grid). |
+| **07** | **Performance & OKR** | `[x]` | **P1** | Parity verified: Sub-tabs `KRA` (weighted scoring table + Add KRA), `Competency` (grade benchmark vs. self/manager ratings + gap badges), `Skill Set Matrix` (Organization vs. Reportees interactive 1–5 proficiency grid with search), `Provide Feedback` 360-degree slide-out drawer, OKR cycle builder & deviation brackets. |
 | **08** | **Files Hub** | `[x]` | **P0** | Complete parity matching uploaded screenshot: `< Files`, Org Files, Employee Files, HR Templates, M365 dual-write. |
 | **09** | **Employee Information (Operations)** | `[x]` | **P0** | Parity verified: 4-step Add Employee wizard (Provisioning, Account Creation, Work Data, Alerts & Dispatch), 10-section Employee Profile schema with interactive tabular repeating rows (Work Experience, Education Details, Dependent Details), auto-computed Age from DOB, and AES-256 statutory vault masking. |
 | **10** | **Compensation & Payroll** | `[x]` | **P1** | Kenyan statutory engine (PAYE, NSSF, SHIF, Housing Levy), Salary Structures, Payslip inline PDF modal. |
@@ -168,11 +168,12 @@
 - `[x]` Deviation thresholds table (`Yet to Start`, `On Track`, `Need Attention`, `At Risk`, `Off Track`, `Completed`).
 - `[x]` Location-based OKR scoping toggle.
 - `[x]` Annual/quarterly appraisal cycle workflows and PIPs.
-- `[~]` **Performance Sub-Tabs**:
-  - `[ ]` `KRA` (Key Result Area weighting table).
-  - `[ ]` `Skill Set Matrix` (Organization vs. Reportees proficiency matrix with search filters).
-  - `[ ]` `Competency` framework ratings.
-  - `[ ]` `Provide Feedback` slide-out drawer (360-degree peer feedback).
+- `[x]` **Performance Sub-Tabs**:
+  - `[x]` `KRA` (Key Result Area weighting table with 100% balance indicator & weighted score calculation).
+  - `[x]` `Skill Set Matrix` (Organization vs. Reportees proficiency matrix with search filters & inline calibration).
+  - `[x]` `Competency` framework ratings with expected vs. actual gap badges.
+  - `[x]` `Provide Feedback` slide-out drawer (360-degree peer feedback + live history feed).
+- `[x]` 3/3 passing Vitest tests in `tests/performance_parity.test.ts`.
 
 ### P1.4 Compensation & Payroll (`#compensation`)
 - `[x]` Kenyan statutory tax engine (PAYE bands, NSSF Tier I/II, SHIF 2.75%, Affordable Housing Levy 1.5%).

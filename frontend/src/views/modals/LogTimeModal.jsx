@@ -30,6 +30,13 @@ function getWeekDates(anchorDateStr) {
   return days;
 }
 
+function fmtLocalYmd(dt) {
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const d = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 function getSemiMonthDates(anchorDateStr, half = 'FIRST') {
   const base = anchorDateStr ? new Date(`${anchorDateStr}T00:00:00`) : new Date();
   const year = base.getFullYear();
@@ -43,7 +50,7 @@ function getSemiMonthDates(anchorDateStr, half = 'FIRST') {
     const dow = dt.getDay();
     days.push({
       dayNum: d,
-      date: dt.toISOString().slice(0, 10),
+      date: fmtLocalYmd(dt),
       label: dt.toLocaleDateString('en-US', { weekday: 'short' }),
       isWeekend: dow === 0 || dow === 6,
     });
