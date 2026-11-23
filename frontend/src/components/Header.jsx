@@ -247,13 +247,52 @@ export default function Header({
                         className="w-full px-3 py-1.5 text-left hover:bg-blue-50 flex items-center justify-between"
                       >
                         <span className="font-medium text-slate-800">{emp.firstName} {emp.lastName}</span>
-                        <span className="text-[10px] text-slate-400">{emp.employeeNumber}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">{emp.employeeNumber}</span>
                       </button>
                     ))}
+                  
+                  {/* System Modules & Services Search */}
+                  <div className="px-3 py-1 mt-1 border-t border-slate-100 text-[10px] font-bold uppercase text-slate-400">Services & Modules</div>
+                  {[
+                    { id: 'workspace', top: 'myspace', label: 'Home - My Space' },
+                    { id: 'workspace', top: 'team', label: 'Home - Team Space' },
+                    { id: 'workspace', top: 'organization', label: 'Home - Organization & Org Chart' },
+                    { id: 'directory', top: 'onboarding', label: 'Onboarding - Candidate Hub' },
+                    { id: 'directory', top: 'employees', label: 'Employee Information' },
+                    { id: 'inbox', top: 'mydata', label: 'Leave Tracker & Absence Calendar' },
+                    { id: 'attendance', top: 'mydata', label: 'Attendance & Regularization' },
+                    { id: 'timetracker', top: 'mydata', label: 'Time Tracker' },
+                    { id: 'performance', top: 'appraisals', label: 'Performance & Appraisals' },
+                    { id: 'okr', top: 'configuration', label: 'OKR Cycle Configuration' },
+                    { id: 'admin', top: 'files', label: 'Files Hub & SharePoint Sync' },
+                    { id: 'payroll', top: 'compensation', label: 'Compensation & Kenyan Payroll' },
+                    { id: 'operations', top: 'approvals', label: 'Operations Approvals Hub' },
+                    { id: 'operations', top: 'operations', label: 'Operations 17-Service Catalogue' },
+                    { id: 'reports', top: 'myreports', label: 'Enterprise Reports Catalogue' },
+                    { id: 'hardening', top: 'orgsettings', label: 'Settings & Administration' },
+                  ]
+                    .filter((m) => m.label.toLowerCase().includes(globalSearch.toLowerCase()))
+                    .slice(0, 4)
+                    .map((m) => (
+                      <button
+                        key={`${m.id}-${m.top}`}
+                        type="button"
+                        onClick={() => {
+                          setSearchOpen(false);
+                          setGlobalSearch('');
+                          setActiveTab(m.id, m.top);
+                        }}
+                        className="w-full px-3 py-1.5 text-left hover:bg-blue-50 text-slate-700 flex items-center justify-between"
+                      >
+                        <span className="font-medium text-slate-800 text-xs">{m.label}</span>
+                        <span className="text-[10px] text-[#0088ff] font-semibold">Jump →</span>
+                      </button>
+                    ))}
+
                   <div className="px-3 py-1 mt-1 border-t border-slate-100 text-[10px] font-bold uppercase text-slate-400">Policies</div>
                   {policies
                     .filter((pol) => (pol.title || '').toLowerCase().includes(globalSearch.toLowerCase()))
-                    .slice(0, 4)
+                    .slice(0, 3)
                     .map((pol) => (
                       <button
                         key={pol.id}
@@ -296,7 +335,7 @@ export default function Header({
             </div>
           ) : null}
 
-          {/* Blue Square + Quick Add Button */}
+          {/* Blue Square + Quick Add Button matching Zoho People 11-action split menu */}
           <div className="relative" ref={quickAddRef}>
             <button
               type="button"
@@ -308,67 +347,165 @@ export default function Header({
             </button>
 
             {quickAddOpen && (
-              <div className="absolute right-0 mt-2 w-52 bg-white text-slate-800 rounded-lg shadow-xl border border-slate-200 py-1.5 z-50 animate-fadeIn">
-                <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                  Quick Actions
+              <div className="absolute right-0 mt-2 w-64 bg-white text-slate-800 rounded-lg shadow-2xl border border-slate-200 py-2 z-50 animate-fadeIn divide-y divide-slate-100">
+                {/* Section 1: Recruitment & People */}
+                <div className="px-3 py-1.5">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                    Recruitment & People
+                  </div>
+                  <div className="grid grid-cols-2 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickAddOpen(false);
+                        setActiveTab('directory', 'onboarding');
+                      }}
+                      className="px-2 py-1.5 text-left text-xs rounded hover:bg-blue-50 text-slate-700 hover:text-[#0088ff] font-medium"
+                    >
+                      + Candidate
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickAddOpen(false);
+                        setActiveTab('directory', 'employees');
+                      }}
+                      className="px-2 py-1.5 text-left text-xs rounded hover:bg-blue-50 text-slate-700 hover:text-[#0088ff] font-medium"
+                    >
+                      + Employee
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickAddOpen(false);
+                        setActiveTab('workspace', 'organization');
+                      }}
+                      className="px-2 py-1.5 text-left text-xs rounded hover:bg-blue-50 text-slate-700 hover:text-[#0088ff] font-medium"
+                    >
+                      + Department
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickAddOpen(false);
+                        setActiveTab('workspace', 'organization');
+                      }}
+                      className="px-2 py-1.5 text-left text-xs rounded hover:bg-blue-50 text-slate-700 hover:text-[#0088ff] font-medium"
+                    >
+                      + Designation
+                    </button>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setQuickAddOpen(false);
-                    onOpenLeaveModal && onOpenLeaveModal();
-                  }}
-                  className="w-full px-3.5 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2.5"
-                >
-                  <Umbrella size={14} className="text-teal-500" />
-                  <span>Apply Leave</span>
-                </button>
-                {canManageDirectory && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setQuickAddOpen(false);
-                      setActiveTab('directory', 'onboarding', 'records');
-                    }}
-                    className="w-full px-3.5 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2.5"
-                  >
-                    <UserPlus size={14} className="text-[#0088ff]" />
-                    <span>Add Candidate / Employee</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setQuickAddOpen(false);
-                    setActiveTab('timetracker');
-                  }}
-                  className="w-full px-3.5 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2.5"
-                >
-                  <Clock size={14} className="text-emerald-500" />
-                  <span>Log Time</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setQuickAddOpen(false);
-                    setActiveTab('hrletters');
-                  }}
-                  className="w-full px-3.5 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2.5"
-                >
-                  <Star size={14} className="text-amber-500" />
-                  <span>Request Address Proof Letter</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setQuickAddOpen(false);
-                    onOpenAbsenceModal && onOpenAbsenceModal();
-                  }}
-                  className="w-full px-3.5 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2.5"
-                >
-                  <Trophy size={14} className="text-purple-500" />
-                  <span>Report Absence</span>
-                </button>
+
+                {/* Section 2: Time Off & Attendance */}
+                <div className="px-3 py-1.5">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                    Time Off & Attendance
+                  </div>
+                  <div className="grid grid-cols-2 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickAddOpen(false);
+                        onOpenLeaveModal && onOpenLeaveModal();
+                      }}
+                      className="px-2 py-1.5 text-left text-xs rounded hover:bg-blue-50 text-slate-700 hover:text-[#0088ff] font-medium"
+                    >
+                      + Leave
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickAddOpen(false);
+                        onOpenAbsenceModal && onOpenAbsenceModal();
+                      }}
+                      className="px-2 py-1.5 text-left text-xs rounded hover:bg-blue-50 text-slate-700 hover:text-[#0088ff] font-medium"
+                    >
+                      + Absence
+                    </button>
+                  </div>
+                </div>
+
+                {/* Section 3: HR Letters */}
+                <div className="px-3 py-1.5">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                    HR Letters
+                  </div>
+                  <div className="space-y-0.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickAddOpen(false);
+                        setActiveTab('hrletters', 'addressproof');
+                      }}
+                      className="w-full px-2 py-1 text-left text-xs rounded hover:bg-blue-50 text-slate-700 hover:text-[#0088ff] font-medium flex items-center justify-between"
+                    >
+                      <span>+ Address Proof</span>
+                      <span className="text-[10px] text-slate-400">PDF</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickAddOpen(false);
+                        setActiveTab('hrletters', 'addressproof');
+                      }}
+                      className="w-full px-2 py-1 text-left text-xs rounded hover:bg-blue-50 text-slate-700 hover:text-[#0088ff] font-medium flex items-center justify-between"
+                    >
+                      <span>+ Bonafide Letter</span>
+                      <span className="text-[10px] text-slate-400">PDF</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickAddOpen(false);
+                        setActiveTab('hrletters', 'addressproof');
+                      }}
+                      className="w-full px-2 py-1 text-left text-xs rounded hover:bg-blue-50 text-slate-700 hover:text-[#0088ff] font-medium flex items-center justify-between"
+                    >
+                      <span>+ Experience Letter</span>
+                      <span className="text-[10px] text-slate-400">PDF</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Section 4: Travel & Tasks */}
+                <div className="px-3 py-1.5">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                    Travel & Operations
+                  </div>
+                  <div className="grid grid-cols-2 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickAddOpen(false);
+                        setActiveTab('travel', 'travel');
+                      }}
+                      className="px-2 py-1.5 text-left text-xs rounded hover:bg-blue-50 text-slate-700 hover:text-[#0088ff] font-medium"
+                    >
+                      + Travel Request
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickAddOpen(false);
+                        setActiveTab('travel', 'travel');
+                      }}
+                      className="px-2 py-1.5 text-left text-xs rounded hover:bg-blue-50 text-slate-700 hover:text-[#0088ff] font-medium"
+                    >
+                      + Travel Expense
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickAddOpen(false);
+                        setActiveTab('tasks', 'tasks');
+                      }}
+                      className="col-span-2 px-2 py-1.5 text-left text-xs rounded hover:bg-blue-50 text-slate-700 hover:text-[#0088ff] font-medium"
+                    >
+                      + Operational Task
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>

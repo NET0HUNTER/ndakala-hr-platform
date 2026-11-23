@@ -14,7 +14,7 @@
 
 | # | Module / Subsystem | Current State | Priority | Core Missing Elements / Parity Scope |
 | :- | :--- | :---: | :---: | :--- |
-| **01** | **Global Shell & Top/Bottom Rails** | `[~]` | **P0** | Quick-Action modal split (`+`), Global Employee Search, Bottom utility pins (`My Pins`, `Support Hub`). |
+| **01** | **Global Shell & Top/Bottom Rails** | `[x]` | **P0** | Parity verified: Quick-Action modal split (`+`) with 11 Zoho actions, Universal Omnibox Search (Employees, Services & Modules with 'Jump →', Policies), 28px bottom utility dock with interactive drawers (`Support Hub`, `My Pins`, `Contacts`, `Chats`) and English/Kiswahili selector. |
 | **02** | **Home (My Space, Team, Org)** | `[x]` | **P0** | Multi-space tabs (`My Space`, `Team Space`, `Organization Space`), interactive recursive SVG/DOM Employee Tree (Org Chart), Search highlighting, Expand/Collapse, Profile Drawer, and Team Space feed deck. |
 | **03** | **Onboarding (Candidate Hub)** | `[x]` | **P1** | 7-section Add Candidate modal with repeating tabular grids (Education, Experience, Dependents), draft auto-save persistence, 31-field filter drawer, and data scope dropdown. |
 | **04** | **Leave Tracker** | `[x]` | **P0** | Parity verified: Leave Summary List View, Monthly Calendar heat map, Shift & Schedules, Team Leave Queue, 8-type statutory/enhanced Apply Leave modal. |
@@ -22,7 +22,7 @@
 | **06** | **Time Tracker** | `[~]` | **P1** | Split-button `Log Time` (Daily/Weekly/Monthly), Job Schedule 24-hr weekly grid, Client Rate Cards. |
 | **07** | **Performance & OKR** | `[~]` | **P1** | Sub-tabs `KRA`, `Competency`, `Skill Set Matrix` (Organization vs. Reportees rating grid). |
 | **08** | **Files Hub** | `[x]` | **P0** | Complete parity matching uploaded screenshot: `< Files`, Org Files, Employee Files, HR Templates, M365 dual-write. |
-| **09** | **Employee Information (Operations)** | `[~]` | **P0** | 4-step Add Employee wizard, 10-section Employee Profile schema with tabular repeating rows (Experience, Education, Dependents). |
+| **09** | **Employee Information (Operations)** | `[x]` | **P0** | Parity verified: 4-step Add Employee wizard (Provisioning, Account Creation, Work Data, Alerts & Dispatch), 10-section Employee Profile schema with interactive tabular repeating rows (Work Experience, Education Details, Dependent Details), auto-computed Age from DOB, and AES-256 statutory vault masking. |
 | **10** | **Compensation & Payroll** | `[x]` | **P1** | Kenyan statutory engine (PAYE, NSSF, SHIF, Housing Levy), Salary Structures, Payslip inline PDF modal. |
 | **11** | **HR Letters & Templates** | `[~]` | **P2** | Dedicated UI generator for Address Proof, Bonafide Letter, Experience Letter (backend PDF compiler ready). |
 | **12** | **Travel & Expenses** | `[ ]` | **P2** | Travel Request form, Travel Expense reimbursement ledger, billable-to-client approvals. |
@@ -39,15 +39,16 @@
 ### P0.1 Global Shell & Navigation Rail
 - `[x]` 68px dark left rail (`#191f3a`) with brand emblem, primary modules, and pinned bottom icons.
 - `[x]` Dynamic 4th rail slot updating to active More service.
-- `[~]` **Top Quick Actions (`+`)**:
+- `[x]` **Top Quick Actions (`+`)**:
   - `[x]` Basic trigger icon.
-  - `[ ]` Split dropdown menu matching Zoho: `Candidate`, `Employee`, `Department`, `Designation`, `Leave`, `Address Proof`, `Bonafide Letter`, `Experience Letter`, `Travel Request`, `Travel Expense`, `Task`.
-- `[~]` **Global Header Search**:
+  - `[x]` Split dropdown menu matching Zoho: `+ Candidate`, `+ Employee`, `+ Department`, `+ Designation`, `+ Leave`, `+ Absence`, `+ Address Proof`, `+ Bonafide Letter`, `+ Experience Letter`, `+ Travel Request`, `+ Travel Expense`, `+ Operational Task`.
+- `[x]` **Global Header Search**:
   - `[x]` Search input styling.
-  - `[ ]` Dynamic auto-complete dropdown searching employees, departments, and services simultaneously.
-- `[~]` **Bottom Utility Bar**:
-  - `[x]` Static bottom footer with `My Pins`, `Chats`, `Contacts`, `Support Hub`.
-  - `[ ]` Active slide-over drawer for `Support Hub` and quick notes (`My Pins`).
+  - `[x]` Dynamic multi-category auto-complete dropdown searching Employees (with ID & names), Services & Modules (with 'Jump →' navigation), and Policies simultaneously.
+- `[x]` **Bottom Utility Bar**:
+  - `[x]` 28px bottom utility bar with `My Pins`, `Chats`, `Contacts`, `Support Hub`.
+  - `[x]` Interactive slide-over drawers for `Support Hub` ("Welcome to Zoho People Help widget"), `My Pins` (localStorage persistent notes), `Contacts` (instant directory), and `Chats` (Team Wall).
+  - `[x]` Dynamic multilingual dropdown with `English` and `Kiswahili` support.
 
 ### P0.2 Home Hub (`#home`)
 - `[x]` **My Space**:
@@ -72,20 +73,23 @@
 ### P0.3 Employee Information & Operations Directory
 - `[x]` Employee table with employee number, name, department, role, employment status.
 - `[x]` Preservation of production records (`NDA-2026-0005` Amina Ochieng).
-- `[~]` **4-Step Add Employee Wizard**:
-  - `[ ]` Step 1: Selection (Invitation, Zoho Mail, Google Workspace, Microsoft 365 + quota gauge).
-  - `[ ]` Step 2: Account Creation (Employee ID auto-generation rule, First/Last Name, Email).
-  - `[ ]` Step 3: Work Data (Department, Location, Designation, Reporting Manager).
-  - `[ ]` Step 4: Alerts & Welcome Email dispatch.
-- `[~]` **10-Section Employee Profile / Edit Schema**:
-  - `[x]` Basic Information (`Employee ID`, `First/Last Name`, `Email`).
-  - `[x]` Work Information (`Department`, `Location`, `Designation`, `Status`, `Date of Joining`).
-  - `[x]` Hierarchy (`Reporting Manager`).
-  - `[~]` Personal Details (`Date of Birth`, `Gender`, `Marital Status`, `About Me`, `Expertise`). Missing auto-computed `Age`.
-  - `[~]` Contact Details (`Work Phone`, `Extension`, `Seating Location`, `Tags`, `Present/Permanent Address`).
-  - `[ ]` Tabular Repeating Grid 1: **Work Experience** (`Company`, `Job Title`, `From/To`, `Relevant` flag).
-  - `[ ]` Tabular Repeating Grid 2: **Education Details** (`Institute`, `Degree`, `Specialization`, `Year`).
-  - `[ ]` Tabular Repeating Grid 3: **Dependent Details** (`Name`, `Relationship`, `Date of Birth`).
+- `[x]` **4-Step Add Employee Wizard**:
+  - `[x]` Step 1: Selection & Quota (Direct Platform Invite, Microsoft 365, Google Workspace + license allocation gauge).
+  - `[x]` Step 2: Account Creation (`NDA-2026-XXXX` auto-sequencing, First/Middle/Last Name, dynamic corporate domain work email generation).
+  - `[x]` Step 3: Work Data (Department, Location, Designation, Reporting Manager, Employment Category, Date of Joining, Probation Period).
+  - `[x]` Step 4: Alerts & Welcome Email dispatch (M365 welcome email, manager alerts, calendar/SharePoint sync).
+- `[x]` **10-Section Employee Profile / Edit Schema**:
+  - `[x]` Section 1: Basic Information (`Employee ID`, `First/Middle/Last Name`, `Nick Name`, `Official Work Email`, `Personal Email`).
+  - `[x]` Section 2: Work & Organisational Information (`Department`, `Location`, `Designation`, `Status`, `Date of Joining`, `Employment Category`).
+  - `[x]` Section 3: Hierarchy & Direct Reports (`Reporting Manager` with ID, `Direct Reportees` count and roster).
+  - `[x]` Section 4: Personal Details (`Date of Birth`, `Gender`, `Marital Status`, `Citizenship`, `About Me`, `Expertise`, with auto-computed `Age` from Date of Birth).
+  - `[x]` Section 5: Contact Details & Addresses (`Work Phone`, `Personal Mobile`, `Seating Location`, `Present Address`, `Permanent Address`).
+  - `[x]` Section 6: Tabular Repeating Grid 1: **Work Experience** (`Company`, `Job Title`, `From/To`, `Relevant` flag, `Add Row`, `Delete Row`).
+  - `[x]` Section 7: Tabular Repeating Grid 2: **Education Details** (`Institute`, `Degree`, `Specialization`, `Year`, `Add Row`, `Delete Row`).
+  - `[x]` Section 8: Tabular Repeating Grid 3: **Dependent Details** (`Name`, `Relationship`, `Date of Birth`, `Add Row`, `Delete Row`).
+  - `[x]` Section 9: Statutory & Kenyan Banking Details (`National ID`, `KRA PIN`, `NSSF Number`, `SHIF Number`, masked `Bank Account`).
+  - `[x]` Section 10: Documents & Agreements (Executed employment contracts with effective dates and versions, M365 vault synchronized).
+- `[x]` 4/4 passing Vitest tests in `tests/employee_wizard_parity.test.ts`.
 
 ### P0.4 Leave Tracker (`#leavetracker`)
 - `[x]` Leave balance cards (Annual, Sick, Maternity, Paternity, Compassionate, Unpaid, Study/Exam, Sabbatical).

@@ -13,6 +13,7 @@ import IntegrationsSecurityView from './views/IntegrationsSecurityView';
 import OperationsHubView from './views/OperationsHubView';
 import AttendanceView from './views/AttendanceView';
 import ReportsView from './views/ReportsView';
+import BottomUtilityDock from './components/BottomUtilityDock';
 import LeaveRequestModal, {
   findOverlappingLeaveRequests,
   getNextAvailableLeaveWindow,
@@ -895,6 +896,12 @@ export default function App() {
             />
           )}
         </main>
+
+        <BottomUtilityDock
+          employees={employees}
+          currentUser={currentUser}
+          onNavigateTab={handleSelectModule}
+        />
       </div>
 
       <LeaveRequestModal

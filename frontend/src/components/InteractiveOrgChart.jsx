@@ -350,7 +350,7 @@ export default function InteractiveOrgChart({ employees = [], departments = [], 
                 <div className="flex items-center justify-between py-1.5 border-b border-slate-100">
                   <span className="text-slate-400">Email ID</span>
                   <span className="font-mono text-slate-800 truncate max-w-[180px]">
-                    {selectedEmp.user?.email || selectedEmp.email || 'corporate@ndakalaadvisory.co.ke'}
+                    {selectedEmp.workEmail || selectedEmp.user?.email || selectedEmp.email || (selectedEmp.firstName ? `${selectedEmp.firstName.toLowerCase()}.${selectedEmp.lastName?.toLowerCase() || 'user'}@domain.com` : 'unassigned@domain.com')}
                   </span>
                 </div>
                 <div className="flex items-center justify-between py-1.5 border-b border-slate-100">

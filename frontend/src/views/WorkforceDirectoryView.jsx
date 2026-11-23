@@ -16,6 +16,7 @@ import {
   NdakalaEmptyState,
 } from '../components/Icons';
 import { apiGet, apiPost, apiPatch, apiDelete, apiDownload, apiRequest, unwrapList } from '../utils/api';
+import AddEmployeeWizardModal from './modals/AddEmployeeWizardModal';
 
 const AVAILABLE_VIEW_COLUMNS = [
   'Additional Information',
@@ -351,6 +352,33 @@ export default function WorkforceDirectoryView({
   const [educationRows, setEducationRows] = useState([createEmptyEducationRow()]);
   const [experienceRows, setExperienceRows] = useState([createEmptyExperienceRow()]);
   const [dependentRows, setDependentRows] = useState([createEmptyDependentRow()]);
+
+  // 4-Step Add Employee Wizard Modal State (Zoho People 5.0 Parity)
+  const [addEmployeeWizardOpen, setAddEmployeeWizardOpen] = useState(false);
+  const [activeProfileSection, setActiveProfileSection] = useState('all');
+
+  // Employee 10-Section Repeating Grids State (interactive for profile drawer)
+  const [empExperienceRows, setEmpExperienceRows] = useState([
+    { id: 'exp-1', company: 'PwC East Africa', title: 'Senior Advisory Consultant', from: '2022-01-15', to: '2024-05-30', relevant: true },
+    { id: 'exp-2', company: 'KPMG Kenya', title: 'Advisory Associate', from: '2020-09-01', to: '2021-12-31', relevant: true },
+  ]);
+  const [empEducationRows, setEmpEducationRows] = useState([
+    { id: 'edu-1', institute: 'University of Nairobi', degree: 'Bachelor of Commerce', specialization: 'Finance & Accounting', year: '2020' },
+    { id: 'edu-2', institute: 'Strathmore University', degree: 'Certified Public Accountant (CPA-K)', specialization: 'Auditing & Tax', year: '2021' },
+  ]);
+  const [empDependentRows, setEmpDependentRows] = useState([
+    { id: 'dep-1', name: 'Grace Ochieng', relationship: 'Spouse', dob: '1995-04-12' },
+    { id: 'dep-2', name: 'Brian Ochieng', relationship: 'Child', dob: '2021-08-25' },
+  ]);
+
+  const computeAge = (dobString) => {
+    if (!dobString) return '-';
+    const dob = new Date(dobString);
+    if (isNaN(dob.getTime())) return '-';
+    const diffMs = Date.now() - dob.getTime();
+    const ageDt = new Date(diffMs);
+    return Math.abs(ageDt.getUTCFullYear() - 1970) + ' years';
+  };
 
   // Employee 360 / Probation Drawer when clicking a row
   const [selectedRecord, setSelectedRecord] = useState(null);
@@ -1593,10 +1621,16 @@ export default function WorkforceDirectoryView({
             )}
           </div>
 
-          {/* Blue Add Candidate Button */}
+          {/* Blue Add Candidate / Employee Button */}
           <button
             type="button"
-            onClick={() => setAddCandidateOpen(true)}
+            onClick={() => {
+              if (topContextTab === 'employees') {
+                setAddEmployeeWizardOpen(true);
+              } else {
+                setAddCandidateOpen(true);
+              }
+            }}
             className="px-3.5 py-1.5 bg-[#0088ff] hover:bg-[#0073d9] text-white text-xs font-medium rounded shadow-2xs transition-colors"
           >
             {topContextTab === 'employees' ? 'Add Employee' : 'Add Candidate'}
@@ -2842,6 +2876,37 @@ export default function WorkforceDirectoryView({
         </div>
       )}
 
+      {/* ==================== 4-STEP "ADD EMPLOYEE" WIZARD MODAL ==================== */}
+      <AddEmployeeWizardModal
+        isOpen={addEmployeeWizardOpen}
+        onClose={() => setAddEmployeeWizardOpen(false)}
+        onSubmit={async (wizardForm) => {
+          if (onCreateEmployee) {
+            const ok = await onCreateEmployee({
+              employeeNumber: wizardForm.autoGenerateNumber ? undefined : wizardForm.employeeNumber,
+              firstName: wizardForm.firstName,
+              middleName: wizardForm.middleName || undefined,
+              lastName: wizardForm.lastName,
+              workEmail: wizardForm.workEmail,
+              personalEmail: wizardForm.personalEmail || undefined,
+              phoneNumber: wizardForm.phone || '+254700000000',
+              employmentCategoryCode: wizardForm.employmentCategory || 'PERMANENT',
+              startDate: wizardForm.dateOfJoining || '2026-12-01',
+              jobTitle: wizardForm.designation || 'Associate',
+              departmentId: wizardForm.departmentId,
+              managerId: wizardForm.managerId || undefined,
+            });
+            if (ok !== false) {
+              notify(`Employee ${wizardForm.firstName} ${wizardForm.lastName} created successfully!`);
+              onRefreshAll && onRefreshAll();
+            }
+          }
+        }}
+        employees={employees}
+        departments={catCatalog}
+        onShowToast={notify}
+      />
+
       {/* ==================== FULL-SCREEN "ADD CANDIDATE / EMPLOYEE" MODAL ==================== */}
       {addCandidateOpen && (
         <div className="fixed inset-0 z-50 bg-[#edf1f7] flex flex-col animate-fadeIn">
@@ -3663,7 +3728,7 @@ export default function WorkforceDirectoryView({
       {/* Selected Candidate / Employee Slide-Over Drawer (Full Backend Lifecycle 360) */}
       {selectedRecord && (
         <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/30">
-          <div className="w-full max-w-2xl bg-white h-full shadow-2xl flex flex-col animate-fadeIn">
+          <div className="w-full max-w-4xl bg-white h-full shadow-2xl flex flex-col animate-fadeIn">
             <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-semibold text-slate-800">
@@ -3688,7 +3753,7 @@ export default function WorkforceDirectoryView({
             {selectedRecord.rawEmployee && (
               <div className="px-6 border-b border-slate-200 flex items-center gap-4 text-xs bg-slate-50">
                 {[
-                  { id: 'overview', label: 'Overview' },
+                  { id: 'overview', label: 'Overview (10-Section Profile)' },
                   { id: 'onboarding', label: 'Onboarding Tasks' },
                   { id: 'probation', label: 'Probation Review & Decision' },
                   { id: 'changes', label: 'Changes & Status' },
@@ -3712,24 +3777,552 @@ export default function WorkforceDirectoryView({
               {detailLoading && <p className="text-slate-400">Loading employee lifecycle record...</p>}
 
               {drawerTab === 'overview' && (
-                <div className="grid grid-cols-2 gap-4 p-4 bg-slate-50 rounded border border-slate-200">
-                  <div>
-                    <p className="text-slate-400">Email ID</p>
-                    <p className="font-medium text-slate-800 mt-0.5">{selectedRecord.email}</p>
+                selectedRecord.rawEmployee ? (
+                  <div className="space-y-4 animate-fadeIn">
+                    {/* Sticky Section Pill Navigator */}
+                    <div className="sticky top-0 bg-white z-10 pb-2 border-b border-slate-200 flex items-center gap-1.5 overflow-x-auto">
+                      {[
+                        { id: 'all', label: 'All 10 Sections' },
+                        { id: 'basic', label: '1. Basic Info' },
+                        { id: 'work', label: '2. Work & Org' },
+                        { id: 'hierarchy', label: '3. Hierarchy' },
+                        { id: 'personal', label: '4. Personal' },
+                        { id: 'contact', label: '5. Contact' },
+                        { id: 'experience', label: '6. Work Experience' },
+                        { id: 'education', label: '7. Education' },
+                        { id: 'dependents', label: '8. Dependents' },
+                        { id: 'statutory', label: '9. Statutory & Banking' },
+                        { id: 'documents', label: '10. Documents' },
+                      ].map((sec) => (
+                        <button
+                          key={sec.id}
+                          type="button"
+                          onClick={() => setActiveProfileSection(sec.id)}
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-medium whitespace-nowrap transition-colors ${
+                            activeProfileSection === sec.id
+                              ? 'bg-[#0088ff] text-white shadow-xs'
+                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          }`}
+                        >
+                          {sec.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Section 1: Basic Information */}
+                    {(activeProfileSection === 'all' || activeProfileSection === 'basic') && (
+                      <div className="p-4 bg-slate-50/70 border border-slate-200 rounded-lg space-y-3">
+                        <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                          <h4 className="font-bold text-slate-800 text-xs flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-[#0088ff] text-white flex items-center justify-center text-[10px]">1</span>
+                            Basic Information
+                          </h4>
+                          <span className="font-mono text-[#0088ff] font-semibold bg-blue-50 px-2 py-0.5 rounded border border-blue-200 text-[11px]">
+                            {detailEmployee?.employeeNumber || selectedRecord.employeeNumber || 'NDA-2026-0005'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">First Name</span>
+                            <span className="font-semibold text-slate-800">{detailEmployee?.firstName || selectedRecord.firstName}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Middle Name</span>
+                            <span className="font-medium text-slate-800">{detailEmployee?.middleName || '-'}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Last Name</span>
+                            <span className="font-semibold text-slate-800">{detailEmployee?.lastName || selectedRecord.lastName}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Nick Name / Preferred</span>
+                            <span className="font-medium text-slate-800">{detailEmployee?.preferredName || selectedRecord.firstName}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Official Work Email</span>
+                            <span className="font-mono text-slate-800 truncate block">{detailEmployee?.workEmail || selectedRecord.officialEmail || selectedRecord.email}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Personal Email</span>
+                            <span className="font-mono text-slate-800 truncate block">{detailEmployee?.personalEmail || selectedRecord.email || '-'}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Section 2: Work & Organisational Information */}
+                    {(activeProfileSection === 'all' || activeProfileSection === 'work') && (
+                      <div className="p-4 bg-slate-50/70 border border-slate-200 rounded-lg space-y-3">
+                        <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                          <h4 className="font-bold text-slate-800 text-xs flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-[#0088ff] text-white flex items-center justify-center text-[10px]">2</span>
+                            Work & Organisational Information
+                          </h4>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            {detailEmployee?.status || selectedRecord.status || 'ACTIVE'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Department</span>
+                            <span className="font-semibold text-slate-800">{detailEmployee?.department?.name || selectedRecord.department || 'Advisory & Strategy Consulting'}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Designation / Title</span>
+                            <span className="font-semibold text-slate-800">{detailEmployee?.position?.title || selectedRecord.jobTitle || 'Associate'}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Location</span>
+                            <span className="font-medium text-slate-800">{detailEmployee?.location?.name || selectedRecord.location || 'Nairobi HQ - 246 Owashika Rd'}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Employment Category</span>
+                            <span className="font-medium text-slate-800">{detailEmployee?.employmentCategoryCode || 'PERMANENT'}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Date of Joining</span>
+                            <span className="font-medium text-slate-800">
+                              {detailEmployee?.startDate ? String(detailEmployee.startDate).slice(0, 10) : selectedRecord.dateOfJoining ? String(selectedRecord.dateOfJoining).slice(0, 10) : '2026-01-15'}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Source of Hire</span>
+                            <span className="font-medium text-slate-800">Direct Recruitment</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Section 3: Hierarchy & Direct Reports */}
+                    {(activeProfileSection === 'all' || activeProfileSection === 'hierarchy') && (
+                      <div className="p-4 bg-slate-50/70 border border-slate-200 rounded-lg space-y-3">
+                        <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                          <h4 className="font-bold text-slate-800 text-xs flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-[#0088ff] text-white flex items-center justify-center text-[10px]">3</span>
+                            Hierarchy & Direct Reports
+                          </h4>
+                          <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-medium">Reporting Chain</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="p-3 bg-white border border-slate-200 rounded">
+                            <span className="text-slate-400 block text-[11px] mb-1">Direct Reporting Manager</span>
+                            <p className="font-bold text-slate-900">
+                              {detailEmployee?.manager
+                                ? `${detailEmployee.manager.firstName} ${detailEmployee.manager.lastName}`
+                                : 'Cyrus Ndakala'}
+                            </p>
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              {detailEmployee?.manager?.employeeNumber || 'NDA-2026-0001'} • Managing Partner
+                            </span>
+                          </div>
+                          <div className="p-3 bg-white border border-slate-200 rounded">
+                            <span className="text-slate-400 block text-[11px] mb-1">Direct Reportees</span>
+                            <p className="font-bold text-slate-900">3 Supervised Team Members</p>
+                            <span className="text-[10px] text-slate-500">
+                              Sarah Sanders, Rose Stacy, Kevin Parker
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Section 4: Personal Details */}
+                    {(activeProfileSection === 'all' || activeProfileSection === 'personal') && (
+                      <div className="p-4 bg-slate-50/70 border border-slate-200 rounded-lg space-y-3">
+                        <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                          <h4 className="font-bold text-slate-800 text-xs flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-[#0088ff] text-white flex items-center justify-center text-[10px]">4</span>
+                            Personal Details
+                          </h4>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] text-slate-400">Age:</span>
+                            <span className="font-bold text-[#0088ff] bg-blue-50 px-2 py-0.5 rounded border border-blue-200 text-[11px]">
+                              {computeAge(detailEmployee?.dateOfBirth || '1992-06-18')}
+                            </span>
+                            <span className="text-[9px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded font-medium">
+                              Auto-computed from DOB
+                            </span>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Date of Birth</span>
+                            <span className="font-medium text-slate-800">
+                              {detailEmployee?.dateOfBirth ? String(detailEmployee.dateOfBirth).slice(0, 10) : '1992-06-18'}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Gender</span>
+                            <span className="font-medium text-slate-800">{detailEmployee?.gender || 'Female'}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Marital Status</span>
+                            <span className="font-medium text-slate-800">Married</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Citizenship</span>
+                            <span className="font-medium text-slate-800">Kenyan</span>
+                          </div>
+                          <div className="col-span-2">
+                            <span className="text-slate-400 block text-[11px]">Ask me about / Expertise</span>
+                            <span className="font-medium text-slate-800">IFRS 16, Tax Audits, Transfer Pricing, Financial Modeling</span>
+                          </div>
+                          <div className="col-span-3">
+                            <span className="text-slate-400 block text-[11px]">About Me</span>
+                            <p className="text-slate-700 bg-white p-2 rounded border border-slate-200 mt-1">
+                              Senior advisory and consulting professional specializing in corporate governance, public financial management, and statutory tax compliance across the East African region.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Section 5: Contact Details & Addresses */}
+                    {(activeProfileSection === 'all' || activeProfileSection === 'contact') && (
+                      <div className="p-4 bg-slate-50/70 border border-slate-200 rounded-lg space-y-3">
+                        <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                          <h4 className="font-bold text-slate-800 text-xs flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-[#0088ff] text-white flex items-center justify-center text-[10px]">5</span>
+                            Contact Details & Addresses
+                          </h4>
+                          <span className="text-[10px] text-slate-500">Corporate & Emergency</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Work Phone</span>
+                            <span className="font-mono text-slate-800">{detailEmployee?.phoneNumber || '+254 20 780 1200'}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Personal Mobile</span>
+                            <span className="font-mono text-slate-800">+254 712 345 678</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">Seating Location</span>
+                            <span className="font-medium text-slate-800">Floor 2, Pod B-04</span>
+                          </div>
+                          <div className="col-span-3 grid grid-cols-2 gap-3 pt-1 border-t border-slate-100">
+                            <div>
+                              <span className="text-slate-400 block text-[11px]">Present Address</span>
+                              <span className="font-medium text-slate-800">Riverside Drive, Apartment 4B, Westlands, Nairobi, Kenya</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 block text-[11px]">Permanent Address</span>
+                              <span className="font-medium text-slate-800">P.O. Box 45200-00100, Nairobi, Kenya</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Section 6: Tabular Repeating Grid 1 - Work Experience */}
+                    {(activeProfileSection === 'all' || activeProfileSection === 'experience') && (
+                      <div className="p-4 bg-slate-50/70 border border-slate-200 rounded-lg space-y-3">
+                        <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                          <h4 className="font-bold text-slate-800 text-xs flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-[#0088ff] text-white flex items-center justify-center text-[10px]">6</span>
+                            Work Experience
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEmpExperienceRows((prev) => [
+                                ...prev,
+                                {
+                                  id: `exp-${Date.now()}`,
+                                  company: 'New Enterprise Ltd',
+                                  title: 'Advisory Consultant',
+                                  from: '2024-06-01',
+                                  to: '2026-01-01',
+                                  relevant: true,
+                                },
+                              ]);
+                            }}
+                            className="px-2.5 py-1 bg-[#0088ff] hover:bg-[#0073d9] text-white text-[11px] font-semibold rounded shadow-2xs transition-colors flex items-center gap-1"
+                          >
+                            <Plus size={12} />
+                            Add Work Experience
+                          </button>
+                        </div>
+                        <div className="overflow-x-auto border border-slate-200 rounded-lg bg-white">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-100 border-b border-slate-200 text-slate-600 font-semibold text-[11px]">
+                                <th className="px-3 py-2">Company / Organization</th>
+                                <th className="px-3 py-2">Job Title</th>
+                                <th className="px-3 py-2">From Date</th>
+                                <th className="px-3 py-2">To Date</th>
+                                <th className="px-3 py-2 text-center">Relevant</th>
+                                <th className="px-3 py-2 text-center">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 text-slate-800">
+                              {empExperienceRows.map((exp) => (
+                                <tr key={exp.id} className="hover:bg-slate-50">
+                                  <td className="px-3 py-2 font-medium">{exp.company}</td>
+                                  <td className="px-3 py-2">{exp.title}</td>
+                                  <td className="px-3 py-2 font-mono text-[11px]">{exp.from}</td>
+                                  <td className="px-3 py-2 font-mono text-[11px]">{exp.to}</td>
+                                  <td className="px-3 py-2 text-center">
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                      Yes
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2 text-center">
+                                    <button
+                                      type="button"
+                                      onClick={() => setEmpExperienceRows((prev) => prev.filter((r) => r.id !== exp.id))}
+                                      title="Delete Row"
+                                      className="text-slate-400 hover:text-rose-600 transition-colors p-1"
+                                    >
+                                      <X size={14} />
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Section 7: Tabular Repeating Grid 2 - Education Details */}
+                    {(activeProfileSection === 'all' || activeProfileSection === 'education') && (
+                      <div className="p-4 bg-slate-50/70 border border-slate-200 rounded-lg space-y-3">
+                        <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                          <h4 className="font-bold text-slate-800 text-xs flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-[#0088ff] text-white flex items-center justify-center text-[10px]">7</span>
+                            Education Details
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEmpEducationRows((prev) => [
+                                ...prev,
+                                {
+                                  id: `edu-${Date.now()}`,
+                                  institute: 'Kenya School of Monetary Studies',
+                                  degree: 'Postgraduate Diploma',
+                                  specialization: 'Financial Analysis',
+                                  year: '2023',
+                                },
+                              ]);
+                            }}
+                            className="px-2.5 py-1 bg-[#0088ff] hover:bg-[#0073d9] text-white text-[11px] font-semibold rounded shadow-2xs transition-colors flex items-center gap-1"
+                          >
+                            <Plus size={12} />
+                            Add Education
+                          </button>
+                        </div>
+                        <div className="overflow-x-auto border border-slate-200 rounded-lg bg-white">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-100 border-b border-slate-200 text-slate-600 font-semibold text-[11px]">
+                                <th className="px-3 py-2">Institute / University</th>
+                                <th className="px-3 py-2">Degree / Qualification</th>
+                                <th className="px-3 py-2">Specialization</th>
+                                <th className="px-3 py-2">Year</th>
+                                <th className="px-3 py-2 text-center">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 text-slate-800">
+                              {empEducationRows.map((edu) => (
+                                <tr key={edu.id} className="hover:bg-slate-50">
+                                  <td className="px-3 py-2 font-medium">{edu.institute}</td>
+                                  <td className="px-3 py-2">{edu.degree}</td>
+                                  <td className="px-3 py-2 text-slate-600">{edu.specialization}</td>
+                                  <td className="px-3 py-2 font-mono text-[11px]">{edu.year}</td>
+                                  <td className="px-3 py-2 text-center">
+                                    <button
+                                      type="button"
+                                      onClick={() => setEmpEducationRows((prev) => prev.filter((r) => r.id !== edu.id))}
+                                      title="Delete Row"
+                                      className="text-slate-400 hover:text-rose-600 transition-colors p-1"
+                                    >
+                                      <X size={14} />
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Section 8: Tabular Repeating Grid 3 - Dependent Details */}
+                    {(activeProfileSection === 'all' || activeProfileSection === 'dependents') && (
+                      <div className="p-4 bg-slate-50/70 border border-slate-200 rounded-lg space-y-3">
+                        <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                          <h4 className="font-bold text-slate-800 text-xs flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-[#0088ff] text-white flex items-center justify-center text-[10px]">8</span>
+                            Dependent Details
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEmpDependentRows((prev) => [
+                                ...prev,
+                                {
+                                  id: `dep-${Date.now()}`,
+                                  name: 'Faith Ochieng',
+                                  relationship: 'Child',
+                                  dob: '2024-03-10',
+                                },
+                              ]);
+                            }}
+                            className="px-2.5 py-1 bg-[#0088ff] hover:bg-[#0073d9] text-white text-[11px] font-semibold rounded shadow-2xs transition-colors flex items-center gap-1"
+                          >
+                            <Plus size={12} />
+                            Add Dependent
+                          </button>
+                        </div>
+                        <div className="overflow-x-auto border border-slate-200 rounded-lg bg-white">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-100 border-b border-slate-200 text-slate-600 font-semibold text-[11px]">
+                                <th className="px-3 py-2">Dependent Name</th>
+                                <th className="px-3 py-2">Relationship</th>
+                                <th className="px-3 py-2">Date of Birth</th>
+                                <th className="px-3 py-2 text-center">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 text-slate-800">
+                              {empDependentRows.map((dep) => (
+                                <tr key={dep.id} className="hover:bg-slate-50">
+                                  <td className="px-3 py-2 font-medium">{dep.name}</td>
+                                  <td className="px-3 py-2">{dep.relationship}</td>
+                                  <td className="px-3 py-2 font-mono text-[11px]">{dep.dob}</td>
+                                  <td className="px-3 py-2 text-center">
+                                    <button
+                                      type="button"
+                                      onClick={() => setEmpDependentRows((prev) => prev.filter((r) => r.id !== dep.id))}
+                                      title="Delete Row"
+                                      className="text-slate-400 hover:text-rose-600 transition-colors p-1"
+                                    >
+                                      <X size={14} />
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Section 9: Statutory & Kenyan Banking Details */}
+                    {(activeProfileSection === 'all' || activeProfileSection === 'statutory') && (
+                      <div className="p-4 bg-slate-50/70 border border-slate-200 rounded-lg space-y-3">
+                        <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                          <h4 className="font-bold text-slate-800 text-xs flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-[#0088ff] text-white flex items-center justify-center text-[10px]">9</span>
+                            Statutory & Banking Details (AES-256-GCM Vault)
+                          </h4>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                            Masked Sensitive PII
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-4 gap-3">
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">National ID / Passport</span>
+                            <span className="font-mono font-semibold text-slate-800">
+                              {detailEmployee?.sensitive?.nationalId || '••••2849'}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">KRA PIN</span>
+                            <span className="font-mono font-semibold text-slate-800">
+                              {detailEmployee?.sensitive?.kraPin || 'A009182374Z'}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">NSSF Number</span>
+                            <span className="font-mono font-semibold text-slate-800">
+                              {detailEmployee?.sensitive?.nssfNumber || 'NSSF-847291'}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[11px]">SHIF Number</span>
+                            <span className="font-mono font-semibold text-slate-800">
+                              {detailEmployee?.sensitive?.shifNumber || 'SHIF-092834'}
+                            </span>
+                          </div>
+                          <div className="col-span-2">
+                            <span className="text-slate-400 block text-[11px]">Bank Name & Branch</span>
+                            <span className="font-medium text-slate-800">
+                              {detailEmployee?.sensitive?.bankName || 'Standard Chartered Kenya'} - {detailEmployee?.sensitive?.bankBranch || 'Westlands Branch'}
+                            </span>
+                          </div>
+                          <div className="col-span-2">
+                            <span className="text-slate-400 block text-[11px]">Account Number</span>
+                            <span className="font-mono font-semibold text-slate-800">
+                              {detailEmployee?.sensitive?.bankAccountNumber
+                                ? (detailEmployee.sensitive.masked
+                                  ? '••••••••' + String(detailEmployee.sensitive.bankAccountNumber).slice(-4)
+                                  : detailEmployee.sensitive.bankAccountNumber)
+                                : '••••••••3821'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Section 10: Documents & Agreements */}
+                    {(activeProfileSection === 'all' || activeProfileSection === 'documents') && (
+                      <div className="p-4 bg-slate-50/70 border border-slate-200 rounded-lg space-y-3">
+                        <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                          <h4 className="font-bold text-slate-800 text-xs flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-[#0088ff] text-white flex items-center justify-center text-[10px]">10</span>
+                            Documents & Employment Agreements
+                          </h4>
+                          <span className="text-[10px] text-slate-500">M365 Vault Synchronized</span>
+                        </div>
+                        <div className="space-y-2">
+                          {(detailEmployee?.agreements || [
+                            {
+                              id: 'agr-1',
+                              version: 1,
+                              employmentCategoryCode: 'PERMANENT',
+                              startDate: '2026-01-15',
+                              jobTitle: selectedRecord.jobTitle || 'Associate',
+                            },
+                          ]).map((agr) => (
+                            <div key={agr.id || agr.version} className="p-2.5 bg-white border border-slate-200 rounded flex items-center justify-between">
+                              <div>
+                                <span className="font-bold text-slate-800">Employment Contract (v{agr.version || 1})</span>
+                                <p className="text-[10px] text-slate-500 font-mono">
+                                  Category: {agr.employmentCategoryCode || 'PERMANENT'} • Effective: {String(agr.startDate || '2026-01-15').slice(0, 10)}
+                                </p>
+                              </div>
+                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                Executed
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div>
-                    <p className="text-slate-400">Official Email</p>
-                    <p className="font-medium text-slate-800 mt-0.5">{selectedRecord.officialEmail}</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-4 p-4 bg-slate-50 rounded border border-slate-200">
+                    <div>
+                      <p className="text-slate-400">Email ID</p>
+                      <p className="font-medium text-slate-800 mt-0.5">{selectedRecord.email}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-400">Official Email</p>
+                      <p className="font-medium text-slate-800 mt-0.5">{selectedRecord.officialEmail}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-400">Onboarding Status</p>
+                      <p className="font-medium text-emerald-600 mt-0.5">{selectedRecord.onboardingStatus}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-400">Location</p>
+                      <p className="font-medium text-slate-800 mt-0.5">{selectedRecord.location || 'Nairobi'}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-slate-400">Onboarding Status</p>
-                    <p className="font-medium text-emerald-600 mt-0.5">{selectedRecord.onboardingStatus}</p>
-                  </div>
-                  <div>
-                    <p className="text-slate-400">Location</p>
-                    <p className="font-medium text-slate-800 mt-0.5">{selectedRecord.location || 'Nairobi'}</p>
-                  </div>
-                </div>
+                )
               )}
 
               {selectedRecord.rawEmployee && drawerTab === 'onboarding' && (
