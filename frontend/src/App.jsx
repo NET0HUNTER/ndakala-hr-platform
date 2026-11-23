@@ -11,6 +11,7 @@ import PerformanceView from './views/PerformanceView';
 import GovernanceView from './views/GovernanceView';
 import IntegrationsSecurityView from './views/IntegrationsSecurityView';
 import OperationsHubView from './views/OperationsHubView';
+import AttendanceView from './views/AttendanceView';
 import ReportsView from './views/ReportsView';
 import LeaveRequestModal, {
   findOverlappingLeaveRequests,
@@ -813,8 +814,20 @@ export default function App() {
             />
           )}
 
+          {activeTab === 'attendance' && (
+            <AttendanceView
+              currentUser={currentUser}
+              topContextTab={topContextTab}
+              setTopContextTab={setTopContextTab}
+              onShowToast={showToast}
+              onNavigateTab={(tab, sub) => {
+                setActiveTab(tab);
+                if (sub) setTopContextTab(sub);
+              }}
+            />
+          )}
+
           {(activeTab === 'timetracker' ||
-            activeTab === 'attendance' ||
             activeTab === 'hrletters' ||
             activeTab === 'admin' ||
             activeTab === 'engagement' ||

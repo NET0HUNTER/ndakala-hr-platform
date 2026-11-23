@@ -156,6 +156,395 @@ export function createWorkspaceRouter(deps: AppDeps): Router {
   });
 
   // =========================================================================
+  // 1B. ATTENDANCE SUMMARY (9 STATUTORY COLUMNS & MONTHLY AGGREGATIONS)
+  // =========================================================================
+  function pad2(n: number): string {
+    return n < 10 ? `0${n}` : `${n}`;
+  }
+
+  function formatSecsToHHMM(secs: number): string {
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    return `${pad2(h)}:${pad2(m)}`;
+  }
+
+  function formatTimeAMPM(date: Date): string {
+    let hours = date.getHours();
+    const minutes = date.getMinutes();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    return `${pad2(hours)}:${pad2(minutes)} ${ampm}`;
+  }
+
+  registerRoute(router, deps, {
+    method: 'get',
+    path: '/attendance/summary',
+    auth: 'session',
+    query: z
+      .object({
+        employeeId: z.string().uuid().optional(),
+        month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+        displayUnit: z.enum(['HOURS', 'DAYS']).default('HOURS'),
+      })
+      .optional(),
+    handler: async ({ auth, query }) => {
+      let targetEmpId = query?.employeeId;
+      const myEmpId = await getActorEmployeeId(deps.prisma, auth.userId);
+      if (!targetEmpId) {
+        targetEmpId = myEmpId || auth.userId;
+      } else if (targetEmpId !== myEmpId && !isHrOrAdmin(auth.roles, auth.permissions)) {
+        throw forbidden('Access denied: cannot view another employee attendance summary.');
+      }
+
+      const now = new Date();
+      const currentMonthStr = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`;
+      const selectedMonth = query?.month || currentMonthStr;
+      const [yearNum, monthNum] = selectedMonth.split('-').map(Number);
+
+      const daysInMonth = new Date(yearNum, monthNum, 0).getDate();
+      const monthStartStr = `${selectedMonth}-01`;
+      const monthEndStr = `${selectedMonth}-${pad2(daysInMonth)}`;
+
+      const punches = await deps.prisma.attendancePunch.findMany({
+        where: {
+          employeeId: targetEmpId,
+          workDate: { gte: monthStartStr, lte: monthEndStr },
+        },
+        orderBy: { clockInAt: 'asc' },
+      });
+
+      const monthStartDate = new Date(`${monthStartStr}T00:00:00.000Z`);
+      const monthEndDate = new Date(`${monthEndStr}T23:59:59.999Z`);
+      const leaves = await deps.prisma.leaveRequest.findMany({
+        where: {
+          employeeId: targetEmpId,
+          status: 'APPROVED',
+          startDate: { lte: monthEndDate },
+          endDate: { gte: monthStartDate },
+        },
+        include: { leaveType: true },
+      });
+
+      const holidays = await deps.prisma.publicHoliday.findMany({
+        where: {
+          date: { gte: monthStartDate, lte: monthEndDate },
+        },
+      });
+
+      const schedule = await deps.prisma.workSchedule.findFirst({
+        where: { isActive: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      let restDays: string[] = ['Saturday', 'Sunday'];
+      if (schedule && schedule.restDays) {
+        try {
+          restDays = JSON.parse(schedule.restDays);
+        } catch {
+          restDays = ['Saturday', 'Sunday'];
+        }
+      }
+      const standardDailyHours = schedule?.dailyWorkingHours || 8.0;
+      const standardDailySecs = standardDailyHours * 3600;
+
+      const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+      const daysData: any[] = [];
+      let presentDays = 0;
+      let absentDays = 0;
+      let leaveDays = 0;
+      let holidayDays = 0;
+      let weekendDays = 0;
+      let totalWorkedSecs = 0;
+      let totalPayableSecs = 0;
+      let totalOvertimeSecs = 0;
+
+      const todayStr = now.toISOString().slice(0, 10);
+
+      for (let day = 1; day <= daysInMonth; day++) {
+        const dateStr = `${selectedMonth}-${pad2(day)}`;
+        const dayDate = new Date(yearNum, monthNum - 1, day);
+        const dayOfWeek = dayDate.getDay();
+        const dayName = DAY_NAMES[dayOfWeek];
+        const formattedDate = `${pad2(day)}-${MONTH_NAMES[monthNum - 1]}-${yearNum} ${dayName.slice(0, 3)}`;
+
+        const isWeekend = restDays.includes(dayName);
+        const holiday = holidays.find((h) => h.date.toISOString().slice(0, 10) === dateStr);
+        const leave = leaves.find((l) => {
+          const lStart = l.startDate.toISOString().slice(0, 10);
+          const lEnd = l.endDate.toISOString().slice(0, 10);
+          return dateStr >= lStart && dateStr <= lEnd;
+        });
+
+        const dayPunches = punches.filter((p) => p.workDate === dateStr);
+
+        let status = 'SCHEDULED';
+        let firstIn = '—';
+        let lastOut = '—';
+        let dayWorkedSecs = 0;
+        let dayPayableSecs = 0;
+        let deviationSecs = 0;
+        let regularization = 'NONE';
+
+        if (dayPunches.length > 0) {
+          status = 'PRESENT';
+          presentDays++;
+          firstIn = formatTimeAMPM(dayPunches[0].clockInAt);
+          const lastPunch = dayPunches[dayPunches.length - 1];
+          if (lastPunch.clockOutAt) {
+            lastOut = formatTimeAMPM(lastPunch.clockOutAt);
+          } else if (dateStr === todayStr) {
+            lastOut = 'Running';
+          }
+
+          for (const p of dayPunches) {
+            if (p.clockOutAt) {
+              dayWorkedSecs += p.totalSecs || 0;
+            } else if (dateStr === todayStr) {
+              dayWorkedSecs += Math.max(0, Math.floor((Date.now() - p.clockInAt.getTime()) / 1000));
+            }
+            if (p.notes && p.notes.includes('Regularized')) {
+              regularization = 'REGULARIZED';
+            }
+          }
+
+          dayPayableSecs = Math.min(dayWorkedSecs, standardDailySecs);
+          if (dayWorkedSecs >= standardDailySecs) {
+            dayPayableSecs = standardDailySecs;
+          }
+          deviationSecs = dayWorkedSecs - standardDailySecs;
+          if (deviationSecs > 0) {
+            totalOvertimeSecs += deviationSecs;
+          }
+          totalWorkedSecs += dayWorkedSecs;
+          totalPayableSecs += dayPayableSecs;
+        } else if (holiday) {
+          status = 'HOLIDAY';
+          holidayDays++;
+          dayPayableSecs = standardDailySecs;
+          totalPayableSecs += dayPayableSecs;
+        } else if (leave) {
+          status = 'ON_LEAVE';
+          leaveDays++;
+          dayPayableSecs = standardDailySecs;
+          totalPayableSecs += dayPayableSecs;
+        } else if (isWeekend) {
+          status = 'WEEKEND';
+          weekendDays++;
+        } else if (dateStr < todayStr) {
+          status = 'ABSENT';
+          absentDays++;
+          deviationSecs = -standardDailySecs;
+        } else {
+          status = 'SCHEDULED';
+        }
+
+        const deviationStr =
+          deviationSecs === 0
+            ? '00:00'
+            : (deviationSecs > 0 ? '+' : '-') + formatSecsToHHMM(Math.abs(deviationSecs));
+
+        daysData.push({
+          date: dateStr,
+          formattedDate,
+          dayName,
+          firstIn,
+          lastOut,
+          totalHours: formatSecsToHHMM(dayWorkedSecs),
+          payableHours: formatSecsToHHMM(dayPayableSecs),
+          deviation: deviationStr,
+          rawWorkedSecs: dayWorkedSecs,
+          rawPayableSecs: dayPayableSecs,
+          rawDeviationSecs: deviationSecs,
+          status,
+          shift: `${schedule?.name || 'General Advisory Shift'} (${schedule?.coreHoursStart || '08:30'} - ${schedule?.coreHoursEnd || '17:30'})`,
+          regularization,
+        });
+      }
+
+      return {
+        month: selectedMonth,
+        employeeId: targetEmpId,
+        days: daysData,
+        summary: {
+          totalDays: daysInMonth,
+          presentDays,
+          absentDays,
+          leaveDays,
+          holidayDays,
+          weekendDays,
+          totalPayableHours: (totalPayableSecs / 3600).toFixed(1),
+          totalWorkedHours: (totalWorkedSecs / 3600).toFixed(1),
+          overtimeHours: (totalOvertimeSecs / 3600).toFixed(1),
+        },
+      };
+    },
+  });
+
+  // Regularize Attendance Punch
+  registerRoute(router, deps, {
+    method: 'post',
+    path: '/attendance/regularize',
+    auth: 'session',
+    body: z.object({
+      workDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      type: z.enum(['MISSING_IN', 'MISSING_OUT', 'FULL_DAY']),
+      clockInTime: z.string().optional(),
+      clockOutTime: z.string().optional(),
+      reason: z.string().min(2).max(100),
+      notes: z.string().max(500).optional(),
+      employeeId: z.string().uuid().optional(),
+    }),
+    handler: async ({ body, auth, req }) => {
+      let targetEmpId = body.employeeId;
+      const myEmpId = await getActorEmployeeId(deps.prisma, auth.userId);
+      if (!targetEmpId) {
+        targetEmpId = myEmpId || auth.userId;
+      } else if (targetEmpId !== myEmpId && !isHrOrAdmin(auth.roles, auth.permissions)) {
+        throw forbidden('Access denied: cannot submit regularization for another employee.');
+      }
+
+      let punch = await deps.prisma.attendancePunch.findFirst({
+        where: { employeeId: targetEmpId, workDate: body.workDate },
+        orderBy: { clockInAt: 'asc' },
+      });
+
+      const inTimeStr = body.clockInTime || '08:30';
+      const outTimeStr = body.clockOutTime || '17:30';
+      const parsedIn = new Date(`${body.workDate}T${inTimeStr}:00.000Z`);
+      const parsedOut = new Date(`${body.workDate}T${outTimeStr}:00.000Z`);
+      const diffSecs = Math.max(0, Math.floor((parsedOut.getTime() - parsedIn.getTime()) / 1000));
+
+      if (punch) {
+        punch = await deps.prisma.attendancePunch.update({
+          where: { id: punch.id },
+          data: {
+            clockInAt: body.type === 'MISSING_OUT' ? punch.clockInAt : parsedIn,
+            clockOutAt: body.type === 'MISSING_IN' ? punch.clockOutAt : parsedOut,
+            totalSecs: diffSecs > 0 ? diffSecs : (punch.totalSecs || 28800),
+            notes: `[Regularized: ${body.reason}] ${body.notes || ''}`.trim(),
+          },
+        });
+      } else {
+        punch = await deps.prisma.attendancePunch.create({
+          data: {
+            employeeId: targetEmpId,
+            workDate: body.workDate,
+            clockInAt: parsedIn,
+            clockOutAt: parsedOut,
+            totalSecs: diffSecs > 0 ? diffSecs : 28800,
+            notes: `[Regularized: ${body.reason}] ${body.notes || ''}`.trim(),
+            source: 'REGULARIZATION',
+          },
+        });
+      }
+
+      await writeAudit(deps.prisma, auditCtx(auth, req), {
+        action: 'ATTENDANCE_REGULARIZED',
+        targetType: 'AttendancePunch',
+        targetId: punch.id,
+        outcome: 'SUCCESS',
+        after: { workDate: body.workDate, type: body.type, reason: body.reason },
+      });
+
+      return { success: true, punch };
+    },
+  });
+
+  // Team Attendance Kanban Board
+  registerRoute(router, deps, {
+    method: 'get',
+    path: '/attendance/team-kanban',
+    auth: 'session',
+    handler: async () => {
+      const today = new Date().toISOString().slice(0, 10);
+
+      const employees = await deps.prisma.employee.findMany({
+        where: { status: 'ACTIVE' },
+        include: {
+          department: { select: { name: true } },
+          position: { select: { title: true } },
+          user: { select: { email: true } },
+        },
+        orderBy: { firstName: 'asc' },
+      });
+
+      const todayPunches = await deps.prisma.attendancePunch.findMany({
+        where: { workDate: today },
+        orderBy: { clockInAt: 'desc' },
+      });
+
+      const todayStart = new Date(`${today}T00:00:00.000Z`);
+      const todayEnd = new Date(`${today}T23:59:59.999Z`);
+      const todayLeaves = await deps.prisma.leaveRequest.findMany({
+        where: {
+          status: 'APPROVED',
+          startDate: { lte: todayEnd },
+          endDate: { gte: todayStart },
+        },
+        include: { leaveType: true },
+      });
+
+      const checkedIn: any[] = [];
+      const onLeave: any[] = [];
+      const notYetIn: any[] = [];
+
+      for (const emp of employees) {
+        const punch = todayPunches.find((p) => p.employeeId === emp.id);
+        const leave = todayLeaves.find((l) => l.employeeId === emp.id);
+
+        const empCard = {
+          id: emp.id,
+          name: `${emp.firstName} ${emp.lastName}`.trim(),
+          employeeNumber: emp.employeeNumber,
+          email: emp.user?.email || '',
+          department: emp.department?.name || 'General Advisory',
+          position: emp.position?.title || 'Team Member',
+          avatarUrl: emp.avatarUrl,
+        };
+
+        if (punch) {
+          checkedIn.push({
+            ...empCard,
+            clockInAt: punch.clockInAt,
+            clockOutAt: punch.clockOutAt,
+            firstIn: formatTimeAMPM(punch.clockInAt),
+            lastOut: punch.clockOutAt ? formatTimeAMPM(punch.clockOutAt) : 'Active',
+            totalSecs: punch.totalSecs || 0,
+            status: punch.clockOutAt ? 'Completed' : 'Active Clock-in',
+          });
+        } else if (leave) {
+          onLeave.push({
+            ...empCard,
+            leaveType: leave.leaveType.name,
+            reason: leave.reason,
+            status: 'On Leave',
+          });
+        } else {
+          notYetIn.push({
+            ...empCard,
+            status: 'Not Yet Checked In',
+          });
+        }
+      }
+
+      return {
+        today,
+        summary: {
+          totalCount: employees.length,
+          checkedInCount: checkedIn.length,
+          notYetInCount: notYetIn.length,
+          onLeaveCount: onLeave.length,
+        },
+        checkedIn,
+        notYetIn,
+        onLeave,
+      };
+    },
+  });
+
+  // =========================================================================
   // 2. WORKSPACE FEEDS & ANNOUNCEMENTS (WorkspaceFeed)
   // =========================================================================
   registerRoute(router, deps, {
