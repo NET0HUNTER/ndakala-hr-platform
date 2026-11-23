@@ -15,13 +15,13 @@ describe('Operations Approvals Hub Parity (#operations/approvals)', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data).toBeDefined();
-    expect(Array.isArray(res.body.data)).toBe(true);
-    expect(res.body.counts).toBeDefined();
-    expect(typeof res.body.counts.pendingCount).toBe('number');
-    expect(typeof res.body.counts.totalCount).toBe('number');
+    expect(Array.isArray(res.body.data.data)).toBe(true);
+    expect(res.body.data.counts).toBeDefined();
+    expect(typeof res.body.data.counts.pendingCount).toBe('number');
+    expect(typeof res.body.data.counts.totalCount).toBe('number');
 
-    if (res.body.data.length > 0) {
-      const item = res.body.data[0];
+    if (res.body.data.data.length > 0) {
+      const item = res.body.data.data[0];
       expect(item.id).toBeDefined();
       expect(item.requestId).toBeDefined();
       expect(item.title).toBeDefined();
@@ -40,14 +40,14 @@ describe('Operations Approvals Hub Parity (#operations/approvals)', () => {
     // Filter by module LEAVE
     const leaveRes = await admin.agent.get('/api/v1/operations/approvals?module=LEAVE');
     expect(leaveRes.status).toBe(200);
-    for (const item of leaveRes.body.data) {
+    for (const item of leaveRes.body.data.data) {
       expect(item.module).toBe('LEAVE');
     }
 
     // Filter by status PENDING
     const pendingRes = await admin.agent.get('/api/v1/operations/approvals?status=PENDING');
     expect(pendingRes.status).toBe(200);
-    for (const item of pendingRes.body.data) {
+    for (const item of pendingRes.body.data.data) {
       expect(item.status).toBe('PENDING');
     }
   });
@@ -55,13 +55,12 @@ describe('Operations Approvals Hub Parity (#operations/approvals)', () => {
   it('Scenario 3: Batch approve processes selected approval items atomically', async () => {
     // 1. Employee creates a leave request
     const emp = await loginClient(app, 'employee.one@ndakalaadvisory.co.ke');
-    const leaveType = await prisma.leaveType.findFirst({ where: { code: 'ANNUAL' } });
 
     const createRes = await emp.agent
       .post('/api/v1/leave/requests')
       .set('x-csrf-token', emp.csrfToken)
       .send({
-        leaveTypeId: leaveType!.id,
+        leaveTypeCode: 'ANNUAL',
         startDate: '2026-11-25',
         endDate: '2026-11-26',
         reason: 'Family event attendance',
@@ -82,9 +81,9 @@ describe('Operations Approvals Hub Parity (#operations/approvals)', () => {
       });
 
     expect(batchRes.status).toBe(200);
-    expect(batchRes.body.success).toBe(true);
-    expect(batchRes.body.processedCount).toBe(1);
-    expect(batchRes.body.successfulIds).toContain(leaveRequestId);
+    expect(batchRes.body.data.success).toBe(true);
+    expect(batchRes.body.data.processedCount).toBe(1);
+    expect(batchRes.body.data.successfulIds).toContain(leaveRequestId);
 
     // 3. Verify leave status is now APPROVED in database
     const updated = await prisma.leaveRequest.findUnique({ where: { id: leaveRequestId } });
@@ -93,13 +92,12 @@ describe('Operations Approvals Hub Parity (#operations/approvals)', () => {
 
   it('Scenario 4: Batch reject properly updates item status to REJECTED', async () => {
     const emp = await loginClient(app, 'employee.one@ndakalaadvisory.co.ke');
-    const leaveType = await prisma.leaveType.findFirst({ where: { code: 'ANNUAL' } });
 
     const createRes = await emp.agent
       .post('/api/v1/leave/requests')
       .set('x-csrf-token', emp.csrfToken)
       .send({
-        leaveTypeId: leaveType!.id,
+        leaveTypeCode: 'ANNUAL',
         startDate: '2026-11-28',
         endDate: '2026-11-29',
         reason: 'Weekend extension test',
@@ -115,12 +113,13 @@ describe('Operations Approvals Hub Parity (#operations/approvals)', () => {
       .send({
         itemIds: [leaveRequestId],
         action: 'REJECT',
-        comments: 'Staffing constraints for that period',
+        comments: 'Rejected due to critical project deliverable',
       });
 
     expect(batchRes.status).toBe(200);
-    expect(batchRes.body.success).toBe(true);
-    expect(batchRes.body.successfulIds).toContain(leaveRequestId);
+    expect(batchRes.body.data.success).toBe(true);
+    expect(batchRes.body.data.processedCount).toBe(1);
+    expect(batchRes.body.data.successfulIds).toContain(leaveRequestId);
 
     const updated = await prisma.leaveRequest.findUnique({ where: { id: leaveRequestId } });
     expect(updated?.status).toBe('REJECTED');
