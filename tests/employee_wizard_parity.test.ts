@@ -43,19 +43,20 @@ describe('Global Shell & Employee Information Parity (P0.1 & P0.3)', () => {
     expect(profile.sensitive).toBeDefined();
   });
 
-  it('Scenario 3: Non-HR actor receives masked sensitive statutory details', async () => {
-    const regular = await loginClient(app, 'employee.one@ndakalaadvisory.co.ke');
-    const listRes = await regular.agent.get('/api/v1/employees');
+  it('Scenario 3: Non-HR manager actor receives masked sensitive statutory details for team members', async () => {
+    const mgr = await loginClient(app, 'line.manager@ndakalaadvisory.co.ke');
+    const listRes = await mgr.agent.get('/api/v1/employees');
     expect(listRes.status).toBe(200);
     const items = listRes.body.data?.items || listRes.body.data;
     expect(Array.isArray(items)).toBe(true);
 
-    const anotherEmp = items.find((e: any) => e.workEmail !== 'employee.one@ndakalaadvisory.co.ke');
-    if (anotherEmp) {
-      const detailRes = await regular.agent.get(`/api/v1/employees/${anotherEmp.id}`);
+    if (items.length > 0) {
+      const targetEmp = items[0];
+      const detailRes = await mgr.agent.get(`/api/v1/employees/${targetEmp.id}`);
       if (detailRes.status === 200) {
         const sensitive = detailRes.body.data?.sensitive;
         if (sensitive) {
+          // Line managers cannot view decrypted KRA PIN, NSSF, or Bank account
           expect(sensitive.masked).toBe(true);
           expect(sensitive.kraPin).toBe('[RESTRICTED]');
         }
@@ -91,7 +92,8 @@ describe('Global Shell & Employee Information Parity (P0.1 & P0.3)', () => {
       .send(payload);
 
     expect([200, 201]).toContain(createRes.status);
-    expect(createRes.body.data?.firstName).toBe('Kelvin');
-    expect(createRes.body.data?.workEmail).toBe(payload.workEmail);
+    const created = createRes.body.data?.employee || createRes.body.data;
+    expect(created?.firstName).toBe('Kelvin');
+    expect(created?.workEmail).toBe(payload.workEmail);
   });
 });
