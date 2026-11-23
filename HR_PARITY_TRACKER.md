@@ -18,7 +18,7 @@
 | **02** | **Home (My Space, Team, Org)** | `[~]` | **P0** | Multi-space tabs (`My Space`, `Team`, `Organization`), interactive Employee Tree (Org Chart), Department Directory. |
 | **03** | **Onboarding (Candidate Hub)** | `[~]` | **P1** | 7-section Add Candidate modal/drawer with repeating tabular grids (Education, Experience, Dependents). |
 | **04** | **Leave Tracker** | `[~]` | **P0** | `Leave Summary` Calendar vs. List toggle, `Shift` weekly/monthly timeline, `Team` On-Leave calendar. |
-| **05** | **Attendance** | `[~]` | **P0** | `Attendance Summary` Tabular View with 9 statutory columns, First In/Last Out calculation, Team Kanban. |
+| **05** | **Attendance** | `[x]` | **P0** | Exact 9-column statutory attendance grid, live digital punch widget, display unit toggle (Hours/Days), Regularization request drawer, and Team Attendance Kanban. |
 | **06** | **Time Tracker** | `[~]` | **P1** | Split-button `Log Time` (Daily/Weekly/Monthly), Job Schedule 24-hr weekly grid, Client Rate Cards. |
 | **07** | **Performance & OKR** | `[~]` | **P1** | Sub-tabs `KRA`, `Competency`, `Skill Set Matrix` (Organization vs. Reportees rating grid). |
 | **08** | **Files Hub** | `[x]` | **P0** | Complete parity matching uploaded screenshot: `< Files`, Org Files, Employee Files, HR Templates, M365 dual-write. |
@@ -96,12 +96,16 @@
 ### P0.5 Attendance Tracker (`#attendance`)
 - `[x]` Punch In / Punch Out clock with live timestamp.
 - `[x]` Presence log recording daily first-in and last-out.
-- `[~]` **Tabular View Parity**:
-  - `[ ]` Exact 9-column grid: `Date`, `First In`, `Last Out`, `Total Hours`, `Payable Hours`, `Overtime/Deviation`, `Status` (Present/Absent/On Leave), `Shift(s)`, `Regularization`.
-  - `[ ]` `Days` vs. `Hours` display unit toggle switch.
-  - `[ ]` Regularization request drawer (submit missing punch correction).
-- `[~]` **Team Attendance**:
-  - `[ ]` Team Kanban board grouped by `Checked In`, `Not Yet In`, `On Leave`.
+- `[x]` **Tabular View Parity**:
+  - `[x]` Exact 9-column grid: `Date`, `First In`, `Last Out`, `Total Hours`, `Payable Hours`, `Overtime/Deviation`, `Status` (Present/Absent/On Leave/Holiday/Weekend), `Shift(s)`, `Regularization`.
+  - `[x]` `Days` vs. `Hours` display unit toggle switch (switches both table cells and summary cards).
+  - `[x]` Regularization request drawer (submit missing punch correction or full-day advisory duty).
+  - `[x]` CSV Export for monthly statutory records.
+- `[x]` **Team Attendance Kanban**:
+  - `[x]` 3-column Kanban board grouped by `Checked In Today`, `Not Yet Checked In`, and `On Approved Leave`.
+  - `[x]` Live employee cards with names, employee numbers, positions, departments, and real-time clock-in stamps.
+- `[x]` 4/4 passing Vitest tests in `tests/attendance_parity.test.ts`.
+- `[x]` Verified live on Contabo VPS (`https://ndakalahr.duckdns.org`) with screenshot evidence under `docs/zoho_people_spec/screenshots/attendance/`.
 
 ### P0.6 Operations Approvals Hub (`#operations/approvals`)
 - `[x]` Multi-stage maker-checker approval engine.
