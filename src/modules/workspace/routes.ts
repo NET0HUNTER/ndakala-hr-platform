@@ -6,6 +6,7 @@ import { writeAudit } from '../../core/audit/audit.js';
 import { forbidden, notFound, validation } from '../../core/errors/errors.js';
 import { auditCtx } from '../employees/util.js';
 import { getActorEmployeeId } from '../employees/access.js';
+import { buildStructuredPdf } from '../../core/documents/pdfBuilder.js';
 
 export function createWorkspaceRouter(deps: AppDeps): Router {
   const router = Router();
@@ -941,6 +942,7 @@ export function createWorkspaceRouter(deps: AppDeps): Router {
     query: z
       .object({
         status: z.string().optional(),
+        letterType: z.string().optional(),
         search: z.string().optional(),
       })
       .optional(),
@@ -951,6 +953,7 @@ export function createWorkspaceRouter(deps: AppDeps): Router {
       const where: any = {};
       if (!adminView) where.employeeId = actorEmpId;
       if (query?.status && query.status !== 'ALL') where.status = query.status;
+      if (query?.letterType && query.letterType !== 'ALL') where.letterType = query.letterType;
       if (query?.search) {
         where.OR = [
           { reason: { contains: query.search } },
@@ -992,6 +995,7 @@ export function createWorkspaceRouter(deps: AppDeps): Router {
     auth: 'session',
     body: z.object({
       employeeId: z.string().optional(),
+      letterType: z.enum(['ADDRESS_PROOF', 'BONAFIDE', 'EXPERIENCE']).default('ADDRESS_PROOF'),
       reason: z.string().min(2).max(160),
       otherReason: z.string().max(300).optional(),
       changeInAddress: z.boolean().default(false),
@@ -1007,7 +1011,7 @@ export function createWorkspaceRouter(deps: AppDeps): Router {
       const created = await deps.prisma.hrLetterRequest.create({
         data: {
           employeeId: targetEmpId,
-          letterType: 'ADDRESS_PROOF',
+          letterType: body.letterType || 'ADDRESS_PROOF',
           reason: body.reason,
           otherReason: body.otherReason || null,
           changeInAddress: body.changeInAddress,
@@ -1074,6 +1078,93 @@ export function createWorkspaceRouter(deps: AppDeps): Router {
       });
 
       return updated;
+    },
+  });
+
+  // Compile & stream official A4 PDF for Address Proof / Bonafide / Experience Letters
+  registerRoute(router, deps, {
+    method: 'get',
+    path: '/hr-letters/requests/:id/pdf',
+    auth: 'session',
+    params: z.object({ id: z.string().uuid() }),
+    handler: async ({ auth, params, res }) => {
+      const letter = await deps.prisma.hrLetterRequest.findUnique({ where: { id: params.id } });
+      if (!letter) throw notFound('HrLetterRequest', params.id);
+
+      const adminView = isHrOrAdmin(auth.roles, auth.permissions);
+      const actorEmpId = await resolveActorEmpId(auth.userId);
+      if (!adminView && letter.employeeId !== actorEmpId) {
+        throw forbidden('Cannot access another employee’s HR letter PDF.');
+      }
+
+      const [emp, org] = await Promise.all([
+        deps.prisma.employee.findUnique({
+          where: { id: letter.employeeId },
+          include: { department: true, position: true },
+        }),
+        deps.prisma.organisation.findFirst(),
+      ]);
+
+      const orgName = org?.legalName || 'Ndakala Advisory LLP';
+      const empName = emp ? `${emp.firstName} ${emp.lastName}` : 'Staff Member';
+      const empNum = emp?.employeeNumber || letter.employeeId.slice(0, 8).toUpperCase();
+      const deptName = emp?.department?.name || 'Advisory & Strategy Consulting';
+      const jobTitle = emp?.position?.title || 'Associate';
+      const startDateStr = emp?.createdAt ? new Date(emp.createdAt).toISOString().slice(0, 10) : '2026-01-01';
+
+      const metaByType: Record<string, { title: string; subtitle: string; bodyIntro: string }> = {
+        ADDRESS_PROOF: {
+          title: 'OFFICIAL ADDRESS PROOF & EMPLOYMENT CONFIRMATION',
+          subtitle: 'To Whom It May Concern',
+          bodyIntro: `This is to confirm that ${empName} (Employee ID: ${empNum}) is currently employed with ${orgName} as ${jobTitle} in the ${deptName} department since ${startDateStr}.`,
+        },
+        BONAFIDE: {
+          title: 'BONAFIDE EMPLOYEE CERTIFICATION LETTER',
+          subtitle: 'Official Confirmation of Active Employment',
+          bodyIntro: `This is to certify that ${empName} (Employee ID: ${empNum}) is a bonafide full-time employee of ${orgName}, serving in the capacity of ${jobTitle} within ${deptName} since ${startDateStr}.`,
+        },
+        EXPERIENCE: {
+          title: 'EMPLOYMENT EXPERIENCE & SERVICE LETTER',
+          subtitle: 'Statement of Professional Tenure & Contributions',
+          bodyIntro: `This letter verifies that ${empName} (Employee ID: ${empNum}) has served with ${orgName} as ${jobTitle} in the ${deptName} practice area from ${startDateStr} to present, demonstrating strong professional conduct and advisory delivery.`,
+        },
+      };
+
+      const meta = metaByType[letter.letterType] || metaByType.ADDRESS_PROOF;
+      const pdfBuffer = buildStructuredPdf({
+        title: meta.title,
+        subtitle: meta.subtitle,
+        organizationName: orgName,
+        referenceNumber: `NDK-LTR-${letter.id.slice(0, 8).toUpperCase()}`,
+        generatedBy: auth.email,
+        sections: [
+          { heading: '1. Employment Verification', body: meta.bodyIntro },
+          {
+            heading: '2. Request Purpose & Specifics',
+            body: [
+              `Letter Category: ${letter.letterType.replace('_', ' ')}`,
+              `Stated Purpose / Reason: ${letter.reason}${letter.otherReason ? ` (${letter.otherReason})` : ''}`,
+              letter.addressDetails ? `Recorded Address / Addressee Details: ${letter.addressDetails}` : null,
+              `Approval Status: ${letter.status}`,
+            ]
+              .filter(Boolean)
+              .join('\n'),
+          },
+          {
+            heading: '3. Authorized Signatory',
+            body: `Issued electronically by People & Operations, ${orgName}. For verification inquiries, please contact Human Resources via the official corporate directory.`,
+          },
+        ],
+        footerNote: `Verified Digital HR Letter | Status: ${letter.status} | Generated via Ndakala HR Platform`,
+      });
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="${letter.letterType.toLowerCase()}_${empNum}.pdf"`
+      );
+      res.send(pdfBuffer);
+      return;
     },
   });
 

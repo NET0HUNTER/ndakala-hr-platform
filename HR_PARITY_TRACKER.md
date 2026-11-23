@@ -24,7 +24,7 @@
 | **08** | **Files Hub** | `[x]` | **P0** | Complete parity matching uploaded screenshot: `< Files`, Org Files, Employee Files, HR Templates, M365 dual-write. |
 | **09** | **Employee Information (Operations)** | `[x]` | **P0** | Parity verified: 4-step Add Employee wizard (Provisioning, Account Creation, Work Data, Alerts & Dispatch), 10-section Employee Profile schema with interactive tabular repeating rows (Work Experience, Education Details, Dependent Details), auto-computed Age from DOB, and AES-256 statutory vault masking. |
 | **10** | **Compensation & Payroll** | `[x]` | **P1** | Kenyan statutory engine (PAYE, NSSF, SHIF, Housing Levy), Salary Structures, Payslip inline PDF modal. |
-| **11** | **HR Letters & Templates** | `[~]` | **P2** | Dedicated UI generator for Address Proof, Bonafide Letter, Experience Letter (backend PDF compiler ready). |
+| **11** | **HR Letters & Templates** | `[x]` | **P2** | Parity verified: Dedicated 3-tab HR Letters portal (`Address Proof`, `Bonafide Letter`, `Experience Letter`), request modal (`Submit Request` / `Save Draft`), inline HR Approve/Reject, and instant A4 PDF compilation & preview (`/api/v1/hr-letters/requests/:id/pdf`). |
 | **12** | **Travel & Expenses** | `[ ]` | **P2** | Travel Request form, Travel Expense reimbursement ledger, billable-to-client approvals. |
 | **13** | **Tasks & Checklists** | `[~]` | **P2** | Dedicated task boards, checklist tracking against onboarding and operational milestones. |
 | **14** | **Employee Engagement & Surveys** | `[ ]` | **P2** | Satisfaction surveys, pulse polls, eNPS metric tracking. |
@@ -198,10 +198,11 @@
 ## 4. Priority 2 (P2) — Automation, Specialized Services & Analytics
 
 ### P2.1 HR Letters (`#hrservices`)
-- `[x]` Server-side zero-dependency PDF compiler (`pdfBuilder.ts`).
+- `[x]` Server-side zero-dependency PDF compiler (`pdfBuilder.ts`) exposed at `GET /api/v1/hr-letters/requests/:id/pdf`.
 - `[x]` Pre-seeded templates: `Company Handbook Template`, `Address Proof & Employment Confirmation Form`, `Certificate of Service Form`.
-- `[ ]` Dedicated HR Letters UI view with 3 sub-tabs (`Address Proof`, `Bonafide Letter`, `Experience Letter`).
-- `[ ]` Self-service employee request flow with instant PDF generation upon manager signoff.
+- `[x]` Dedicated HR Letters UI view (`HrLettersPortalView.jsx`) with 3 sub-tabs (`Address Proof`, `Bonafide Letter`, `Experience Letter`).
+- `[x]` Self-service employee request flow with inline HR Approve/Reject and instant A4 PDF preview modal.
+- `[x]` Passing Vitest test in `tests/hr_letters_parity.test.ts`.
 
 ### P2.2 Travel & Expense Tracker (`#travel`)
 - `[ ]` Sub-tabs: `Travel Request`, `Travel Expense`.

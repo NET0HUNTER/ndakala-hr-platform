@@ -140,7 +140,9 @@ export default function Header({
         ];
       case 'hrletters':
         return [
-          { id: 'addressproof', label: 'HR Letters' },
+          { id: 'addressproof', label: 'Address Proof' },
+          { id: 'bonafide', label: 'Bonafide Letter' },
+          { id: 'experience', label: 'Experience Letter' },
         ];
       case 'engagement':
         return [
@@ -449,7 +451,7 @@ export default function Header({
                       type="button"
                       onClick={() => {
                         setQuickAddOpen(false);
-                        setActiveTab('hrletters', 'addressproof');
+                        setActiveTab('hrletters', 'bonafide');
                       }}
                       className="w-full px-2 py-1 text-left text-xs rounded hover:bg-blue-50 text-slate-700 hover:text-[#0088ff] font-medium flex items-center justify-between"
                     >
@@ -460,7 +462,7 @@ export default function Header({
                       type="button"
                       onClick={() => {
                         setQuickAddOpen(false);
-                        setActiveTab('hrletters', 'addressproof');
+                        setActiveTab('hrletters', 'experience');
                       }}
                       className="w-full px-2 py-1 text-left text-xs rounded hover:bg-blue-50 text-slate-700 hover:text-[#0088ff] font-medium flex items-center justify-between"
                     >

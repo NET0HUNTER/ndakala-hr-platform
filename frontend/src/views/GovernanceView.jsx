@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import TimeTrackerView from './TimeTrackerView';
 import JobScheduleGridView from './JobScheduleGridView';
 import LogTimeModal from './modals/LogTimeModal';
+import HrLettersPortalView from './HrLettersPortalView';
 import FilesView from './FilesView';
 import InlineDocumentViewerModal from './modals/InlineDocumentViewerModal';
 import {
@@ -1489,8 +1490,21 @@ export default function GovernanceView({
     );
   }
 
-  // ==================== RENDER 2: HR LETTERS / ADDRESS PROOF VIEW ====================
+  // ==================== RENDER 2: HR LETTERS SELF-SERVICE PORTAL ====================
   if (activeTab === 'hrletters') {
+    return (
+      <HrLettersPortalView
+        topContextTab={topContextTab}
+        setTopContextTab={setTopContextTab}
+        currentUser={currentUser}
+        employees={employees}
+        onShowToast={onShowToast}
+      />
+    );
+  }
+
+  // Legacy block retained unreachable fallback:
+  if (false && activeTab === 'hrletters') {
     const handleSaveAddressProof = async (keepOpen = false, saveAsDraft = false) => {
       const errs = {};
       if (addressForm.reason === 'Select') {
