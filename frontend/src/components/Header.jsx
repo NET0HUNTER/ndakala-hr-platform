@@ -156,7 +156,10 @@ export default function Header({
         ];
       case 'tasks':
         return [
-          { id: 'tasks', label: 'Action & Workflow Tasks' },
+          { id: 'mytasks', label: 'My Tasks' },
+          { id: 'tracktasks', label: 'Track Tasks' },
+          { id: 'alltasks', label: 'All Tasks' },
+          { id: 'checklists', label: 'Checklists' },
         ];
       case 'admin':
         return [

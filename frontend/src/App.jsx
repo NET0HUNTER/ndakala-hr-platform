@@ -118,7 +118,7 @@ export default function App() {
       admin: 'files',
       engagement: 'engagement',
       travel: 'travel',
-      tasks: 'tasks',
+      tasks: 'mytasks',
       operations: 'operations',
       reports: 'myreports',
       hardening: 'orgsettings',

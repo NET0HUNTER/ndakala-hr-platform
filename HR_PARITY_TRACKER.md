@@ -26,7 +26,7 @@
 | **10** | **Compensation & Payroll** | `[x]` | **P1** | Kenyan statutory engine (PAYE, NSSF, SHIF, Housing Levy), Salary Structures, Payslip inline PDF modal. |
 | **11** | **HR Letters & Templates** | `[x]` | **P2** | Parity verified: Dedicated 3-tab HR Letters portal (`Address Proof`, `Bonafide Letter`, `Experience Letter`), request modal (`Submit Request` / `Save Draft`), inline HR Approve/Reject, and instant A4 PDF compilation & preview (`/api/v1/hr-letters/requests/:id/pdf`). |
 | **12** | **Travel & Expenses** | `[x]` | **P2** | Parity verified: Dual-tab `Travel Request` + `Travel Expense` reimbursement ledger (`TravelExpenseView.jsx`), client billability, cash advances, receipt/ETR references, and inline `Approve` / `Reject` / `Reimburse` workflow. |
-| **13** | **Tasks & Checklists** | `[~]` | **P2** | Dedicated task boards, checklist tracking against onboarding and operational milestones. |
+| **13** | **Tasks & Checklists** | `[x]` | **P2** | Parity verified: Standalone Tasks module (`TasksChecklistsView.jsx`) with `My Tasks`, `Track Tasks`, `All Tasks`, `Checklists`, status filters (`Total`, `Open`, `Completed`), List & 3-column Kanban Board, and Onboarding/Offboarding/Payroll milestone checklists. |
 | **14** | **Employee Engagement & Surveys** | `[ ]` | **P2** | Satisfaction surveys, pulse polls, eNPS metric tracking. |
 | **15** | **Approvals (Operations)** | `[x]` | **P0** | Unified `#operations/approvals` dashboard with 17-service Operations Hub, status pills (`Pending`, `Active`), multi-select batch actions, Request Details Drawer, and M365 event sync. |
 | **16** | **Reports Catalogue (47+ Reports)** | `[~]` | **P2** | Categorized reports explorer, Muster Roll, Presence Hours Breakup, Nine-Box Matrix, statutory exports. |
@@ -212,8 +212,9 @@
 
 ### P2.3 Tasks & Checklists (`#task`)
 - `[x]` General task inbox with pending approvals.
-- `[ ]` Standalone Tasks module with tabs: `My Tasks`, `Track Tasks`, `All Tasks` (status filters: `Total`, `Open`, `Completed`).
-- `[ ]` Operational checklists linked to employee onboarding/offboarding stages.
+- `[x]` Standalone Tasks module (`TasksChecklistsView.jsx`) with tabs: `My Tasks`, `Track Tasks`, `All Tasks` (status filters: `Total`, `Open`, `Completed`) and List/Kanban Board toggle.
+- `[x]` Operational checklists linked to employee onboarding, offboarding, and monthly Kenyan statutory payroll close stages.
+- `[x]` Passing Vitest test in `tests/tasks_checklists_parity.test.ts`.
 
 ### P2.4 Employee Engagement & Surveys (`#employeeengagement`)
 - `[ ]` Sub-tabs: `My Data` (Assigned surveys), `Surveys` (eNPS, pulse questionnaires).

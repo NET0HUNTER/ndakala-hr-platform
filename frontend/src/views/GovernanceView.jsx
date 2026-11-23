@@ -4,6 +4,7 @@ import JobScheduleGridView from './JobScheduleGridView';
 import LogTimeModal from './modals/LogTimeModal';
 import HrLettersPortalView from './HrLettersPortalView';
 import TravelExpenseView from './TravelExpenseView';
+import TasksChecklistsView from './TasksChecklistsView';
 import FilesView from './FilesView';
 import InlineDocumentViewerModal from './modals/InlineDocumentViewerModal';
 import {
@@ -2356,8 +2357,21 @@ export default function GovernanceView({
     );
   }
 
-  // ==================== RENDER 2D: ACTION & WORKFLOW TASKS ====================
+  // ==================== RENDER 2D: TASKS & OPERATIONAL CHECKLISTS ====================
   if (activeTab === 'tasks' || subViewHint === 'tasks') {
+    return (
+      <TasksChecklistsView
+        topContextTab={topContextTab}
+        setTopContextTab={setTopContextTab}
+        currentUser={currentUser}
+        employees={employees}
+        onShowToast={onShowToast}
+      />
+    );
+  }
+
+  // Legacy tasks fallback:
+  if (false && (activeTab === 'tasks' || subViewHint === 'tasks')) {
     return (
       <div className="flex flex-col h-full bg-[#edf1f7] p-5 overflow-y-auto space-y-4 text-xs">
         <div className="bg-white rounded-md border border-slate-200 p-5 space-y-4">
