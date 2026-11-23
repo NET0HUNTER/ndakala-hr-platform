@@ -16,7 +16,7 @@
 | :- | :--- | :---: | :---: | :--- |
 | **01** | **Global Shell & Top/Bottom Rails** | `[~]` | **P0** | Quick-Action modal split (`+`), Global Employee Search, Bottom utility pins (`My Pins`, `Support Hub`). |
 | **02** | **Home (My Space, Team, Org)** | `[x]` | **P0** | Multi-space tabs (`My Space`, `Team Space`, `Organization Space`), interactive recursive SVG/DOM Employee Tree (Org Chart), Search highlighting, Expand/Collapse, Profile Drawer, and Team Space feed deck. |
-| **03** | **Onboarding (Candidate Hub)** | `[~]` | **P1** | 7-section Add Candidate modal/drawer with repeating tabular grids (Education, Experience, Dependents). |
+| **03** | **Onboarding (Candidate Hub)** | `[x]` | **P1** | 7-section Add Candidate modal with repeating tabular grids (Education, Experience, Dependents), draft auto-save persistence, 31-field filter drawer, and data scope dropdown. |
 | **04** | **Leave Tracker** | `[~]` | **P0** | `Leave Summary` Calendar vs. List toggle, `Shift` weekly/monthly timeline, `Team` On-Leave calendar. |
 | **05** | **Attendance** | `[x]` | **P0** | Exact 9-column statutory attendance grid, live digital punch widget, display unit toggle (Hours/Days), Regularization request drawer, and Team Attendance Kanban. |
 | **06** | **Time Tracker** | `[~]` | **P1** | Split-button `Log Time` (Daily/Weekly/Monthly), Job Schedule 24-hr weekly grid, Client Rate Cards. |
@@ -135,13 +135,17 @@
 - `[x]` Candidate View list table with 14 main columns.
 - `[x]` Data scope dropdown (`View All Data`, `Reportees + My Data`, `Reportees' Data`, `Direct Reportees' Data`, `My Data`).
 - `[x]` 31-field slide-out filter drawer (System filters + field checkboxes).
-- `[x]` Pagination controls (`Total Record Count : 5`, sizes `10-200`).
-- `[x]` 5 base seed candidates matching Zoho instance.
-- `[~]` **7-Section Add Candidate Form Schema**:
-  - `[ ]` Tabular repeating grid for **Education** (`School`, `Degree`, `Field`, `Completion Date`, `Notes`).
-  - `[ ]` Tabular repeating grid for **Experience** (`Occupation`, `Company`, `Summary`, `Dates`, `Currently Work Here`).
-  - `[ ]` Tabular repeating grid for **Candidate Dependents** (`Name`, `Relationship`, `DOB`).
-  - `[ ]` Split action buttons: `Submit`, `Submit and New`, `Save Draft`, `Cancel`.
+- `[x]` Pagination controls (`Total Record Count : 6`, sizes `10-200`).
+- `[x]` Base seed candidates matching Zoho instance (Sarah Sanders, Rose Stacy, Mathew Morales, Kevin Parker, David Rickman) plus live dynamic entries.
+- `[x]` **7-Section Add Candidate Form Schema**:
+  - `[x]` Tabular repeating grid for **Education** (`School Name`, `Degree/Diploma`, `Field(s) of Study`, `Date of Completion`, `Additional Notes`, `Action`).
+  - `[x]` Tabular repeating grid for **Experience** (`Occupation`, `Company`, `Summary`, `Duration`, `From Date`, `To Date`, `Action`).
+  - `[x]` Tabular repeating grid for **Candidate Dependents** (`Name`, `Relationship`, `Date of Birth`, `Action`).
+  - `[x]` Dynamic row addition (`Add Row` tested and verified 1 -> 2 -> 3 rows) and row deletion.
+  - `[x]` Full action buttons: `Submit`, `Submit and New`, `Save Draft`, `Save & Close`, `Clear Draft`, `Cancel`.
+  - `[x]` Draft state auto-saving and persistence to server `ui-config` / local storage.
+  - `[x]` 5/5 passing Vitest tests in `tests/candidate_onboarding_okr.test.ts`.
+  - `[x]` Verified live on Contabo VPS (`https://ndakalahr.duckdns.org`) with screenshot evidence under `docs/zoho_people_spec/screenshots/onboarding/`.
 
 ### P1.2 Time Tracker (`#timetracker`)
 - `[x]` Daily time entry and basic project assignment.
