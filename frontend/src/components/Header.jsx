@@ -151,7 +151,8 @@ export default function Header({
         ];
       case 'travel':
         return [
-          { id: 'travel', label: 'Business Travel & Per Diem' },
+          { id: 'travel', label: 'Travel Request' },
+          { id: 'expenses', label: 'Travel Expense' },
         ];
       case 'tasks':
         return [
@@ -492,7 +493,7 @@ export default function Header({
                       type="button"
                       onClick={() => {
                         setQuickAddOpen(false);
-                        setActiveTab('travel', 'travel');
+                        setActiveTab('travel', 'expenses');
                       }}
                       className="px-2 py-1.5 text-left text-xs rounded hover:bg-blue-50 text-slate-700 hover:text-[#0088ff] font-medium"
                     >

@@ -25,7 +25,7 @@
 | **09** | **Employee Information (Operations)** | `[x]` | **P0** | Parity verified: 4-step Add Employee wizard (Provisioning, Account Creation, Work Data, Alerts & Dispatch), 10-section Employee Profile schema with interactive tabular repeating rows (Work Experience, Education Details, Dependent Details), auto-computed Age from DOB, and AES-256 statutory vault masking. |
 | **10** | **Compensation & Payroll** | `[x]` | **P1** | Kenyan statutory engine (PAYE, NSSF, SHIF, Housing Levy), Salary Structures, Payslip inline PDF modal. |
 | **11** | **HR Letters & Templates** | `[x]` | **P2** | Parity verified: Dedicated 3-tab HR Letters portal (`Address Proof`, `Bonafide Letter`, `Experience Letter`), request modal (`Submit Request` / `Save Draft`), inline HR Approve/Reject, and instant A4 PDF compilation & preview (`/api/v1/hr-letters/requests/:id/pdf`). |
-| **12** | **Travel & Expenses** | `[ ]` | **P2** | Travel Request form, Travel Expense reimbursement ledger, billable-to-client approvals. |
+| **12** | **Travel & Expenses** | `[x]` | **P2** | Parity verified: Dual-tab `Travel Request` + `Travel Expense` reimbursement ledger (`TravelExpenseView.jsx`), client billability, cash advances, receipt/ETR references, and inline `Approve` / `Reject` / `Reimburse` workflow. |
 | **13** | **Tasks & Checklists** | `[~]` | **P2** | Dedicated task boards, checklist tracking against onboarding and operational milestones. |
 | **14** | **Employee Engagement & Surveys** | `[ ]` | **P2** | Satisfaction surveys, pulse polls, eNPS metric tracking. |
 | **15** | **Approvals (Operations)** | `[x]` | **P0** | Unified `#operations/approvals` dashboard with 17-service Operations Hub, status pills (`Pending`, `Active`), multi-select batch actions, Request Details Drawer, and M365 event sync. |
@@ -205,9 +205,10 @@
 - `[x]` Passing Vitest test in `tests/hr_letters_parity.test.ts`.
 
 ### P2.2 Travel & Expense Tracker (`#travel`)
-- `[ ]` Sub-tabs: `Travel Request`, `Travel Expense`.
-- `[ ]` Travel Request form with arrival/departure dates, customer billability, advance request.
-- `[ ]` Travel Expense ledger with receipt attachment and reimbursement approval.
+- `[x]` Sub-tabs: `Travel Request`, `Travel Expense` (`TravelExpenseView.jsx` + `Header.jsx`).
+- `[x]` Travel Request form with arrival/departure dates, customer billability, client name, and cash advance request.
+- `[x]` Travel Expense ledger (`/api/v1/workspace/travel-expenses`) with receipt/ETR reference and Approve/Reject/Reimburse controls.
+- `[x]` Passing Vitest test in `tests/travel_expense_parity.test.ts`.
 
 ### P2.3 Tasks & Checklists (`#task`)
 - `[x]` General task inbox with pending approvals.

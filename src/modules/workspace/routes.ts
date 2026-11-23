@@ -1379,6 +1379,9 @@ export function createWorkspaceRouter(deps: AppDeps): Router {
       transportMode: z.enum(['FLIGHT', 'RAIL_SGR', 'ROAD', 'LOCAL_TAXI']).default('FLIGHT'),
       perDiemDays: z.number().int().min(1).max(90).optional(),
       estimatedBudgetKes: z.number().min(0).default(0),
+      advanceRequestedKes: z.number().min(0).default(0),
+      billableToClient: z.boolean().default(false),
+      clientName: z.string().max(140).optional(),
       notes: z.string().max(400).optional(),
     }),
     successStatus: 201,
@@ -1398,6 +1401,9 @@ export function createWorkspaceRouter(deps: AppDeps): Router {
         transportMode: body.transportMode,
         perDiemDays: body.perDiemDays || 1,
         estimatedBudgetKes: body.estimatedBudgetKes,
+        advanceRequestedKes: body.advanceRequestedKes || 0,
+        billableToClient: Boolean(body.billableToClient),
+        clientName: body.clientName || '',
         reimbursementAmountKes: 0,
         notes: body.notes || '',
         status: 'SUBMITTED',
@@ -1462,6 +1468,114 @@ export function createWorkspaceRouter(deps: AppDeps): Router {
       await writeAudit(deps.prisma, auditCtx(auth, req), {
         action: `TRAVEL_REQUEST_${body.status}`,
         targetType: 'TravelRequest',
+        targetId: updated.id,
+        outcome: 'SUCCESS',
+      });
+      return updated;
+    },
+  });
+
+  // ---- 7B-2. Travel Expense Reimbursement Ledger ----
+  const TRAVEL_EXPENSE_CODE = 'WS_TRAVEL_EXPENSES';
+  registerRoute(router, deps, {
+    method: 'get',
+    path: '/workspace/travel-expenses',
+    auth: 'session',
+    handler: async ({ auth }) => {
+      const actorEmpId = await resolveActorEmpId(auth.userId);
+      const adminView = isHrOrAdmin(auth.roles, auth.permissions);
+      const items = await readCollection<any>(TRAVEL_EXPENSE_CODE);
+      return {
+        items: adminView ? items : items.filter((e) => e.employeeId === actorEmpId || e.createdById === auth.userId),
+      };
+    },
+  });
+
+  registerRoute(router, deps, {
+    method: 'post',
+    path: '/workspace/travel-expenses',
+    auth: 'session',
+    body: z.object({
+      employeeId: z.string().optional(),
+      travelRequestId: z.string().optional(),
+      category: z
+        .enum(['FLIGHT', 'HOTEL', 'PER_DIEM', 'GROUND_TRANSPORT', 'MEALS', 'CLIENT_ENTERTAINMENT', 'OTHER'])
+        .default('PER_DIEM'),
+      expenseDate: z.string().min(8).max(20),
+      amountKes: z.number().min(1),
+      billableToClient: z.boolean().default(false),
+      clientName: z.string().max(140).optional(),
+      receiptRef: z.string().max(160).optional(),
+      notes: z.string().max(400).optional(),
+    }),
+    successStatus: 201,
+    handler: async ({ auth, body, req }) => {
+      const actorEmpId = await resolveActorEmpId(auth.userId);
+      const targetEmpId = body.employeeId && isHrOrAdmin(auth.roles, auth.permissions) ? body.employeeId : actorEmpId;
+      const emp = await deps.prisma.employee.findFirst({
+        where: { id: targetEmpId },
+        select: { firstName: true, lastName: true },
+      });
+      const items = await readCollection<any>(TRAVEL_EXPENSE_CODE);
+      const created = {
+        id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        employeeId: targetEmpId,
+        employeeName: emp ? `${emp.firstName} ${emp.lastName}` : auth.name || auth.email,
+        travelRequestId: body.travelRequestId || '',
+        category: body.category,
+        expenseDate: body.expenseDate,
+        amountKes: body.amountKes,
+        billableToClient: Boolean(body.billableToClient),
+        clientName: body.clientName || '',
+        receiptRef: body.receiptRef || 'Pending Receipt',
+        notes: body.notes || '',
+        status: 'SUBMITTED',
+        createdById: auth.userId,
+        createdAt: new Date().toISOString(),
+      };
+      await writeCollection(TRAVEL_EXPENSE_CODE, 'Travel Expense Ledger', [created, ...items], auth.userId, auth.email);
+      await writeAudit(deps.prisma, auditCtx(auth, req), {
+        action: 'TRAVEL_EXPENSE_CREATED',
+        targetType: 'TravelExpense',
+        targetId: created.id,
+        outcome: 'SUCCESS',
+      });
+      return created;
+    },
+  });
+
+  registerRoute(router, deps, {
+    method: 'patch',
+    path: '/workspace/travel-expenses/:id',
+    auth: 'session',
+    params: z.object({ id: z.string().min(2) }),
+    body: z.object({
+      status: z.enum(['APPROVED', 'REJECTED', 'REIMBURSED']),
+      approverComment: z.string().max(300).optional(),
+    }),
+    handler: async ({ auth, params, body, req }) => {
+      if (!isHrOrAdmin(auth.roles, auth.permissions)) {
+        throw forbidden('Only HR/Admin managers can approve, reject, or reimburse travel expenses.');
+      }
+      const items = await readCollection<any>(TRAVEL_EXPENSE_CODE);
+      const idx = items.findIndex((e) => e.id === params.id);
+      if (idx === -1) throw notFound('TravelExpense', params.id);
+      const current = items[idx];
+      if (body.status === 'REIMBURSED' && current.status !== 'APPROVED') {
+        throw validation('Only APPROVED travel expenses can be marked REIMBURSED.');
+      }
+      const updated = {
+        ...current,
+        status: body.status,
+        approverComment: body.approverComment || current.approverComment || '',
+        reviewedById: auth.userId,
+        reviewedAt: new Date().toISOString(),
+      };
+      items[idx] = updated;
+      await writeCollection(TRAVEL_EXPENSE_CODE, 'Travel Expense Ledger', items, auth.userId, auth.email);
+      await writeAudit(deps.prisma, auditCtx(auth, req), {
+        action: `TRAVEL_EXPENSE_${body.status}`,
+        targetType: 'TravelExpense',
         targetId: updated.id,
         outcome: 'SUCCESS',
       });

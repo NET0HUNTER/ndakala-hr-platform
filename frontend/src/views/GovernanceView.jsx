@@ -3,6 +3,7 @@ import TimeTrackerView from './TimeTrackerView';
 import JobScheduleGridView from './JobScheduleGridView';
 import LogTimeModal from './modals/LogTimeModal';
 import HrLettersPortalView from './HrLettersPortalView';
+import TravelExpenseView from './TravelExpenseView';
 import FilesView from './FilesView';
 import InlineDocumentViewerModal from './modals/InlineDocumentViewerModal';
 import {
@@ -1971,8 +1972,20 @@ export default function GovernanceView({
     );
   }
 
-  // ==================== RENDER 2B: BUSINESS TRAVEL & PER DIEM ====================
+  // ==================== RENDER 2B: TRAVEL & EXPENSE MANAGEMENT ====================
   if (activeTab === 'travel' || subViewHint === 'travel') {
+    return (
+      <TravelExpenseView
+        topContextTab={topContextTab}
+        setTopContextTab={setTopContextTab}
+        currentUser={currentUser}
+        onShowToast={onShowToast}
+      />
+    );
+  }
+
+  // Legacy travel fallback:
+  if (false && (activeTab === 'travel' || subViewHint === 'travel')) {
     return (
       <div className="flex flex-col h-full bg-[#edf1f7] p-5 overflow-y-auto space-y-4 text-xs">
         <div className="bg-white rounded-md border border-slate-200 p-5 space-y-4">
