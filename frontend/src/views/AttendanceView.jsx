@@ -297,6 +297,17 @@ export default function AttendanceView({
     return hhmmStr;
   };
 
+  const formatLocalTime = (isoStr, fallback) => {
+    if (!isoStr) return fallback || '—';
+    try {
+      const d = new Date(isoStr);
+      if (isNaN(d.getTime())) return fallback || '—';
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    } catch {
+      return fallback || '—';
+    }
+  };
+
   // Export CSV Handler
   const handleExportCSV = () => {
     if (!summaryData.days || summaryData.days.length === 0) return;
@@ -596,12 +607,24 @@ export default function AttendanceView({
                 <p className="text-xl font-bold text-purple-700 mt-1">{summaryData.summary.holidayDays}</p>
               </div>
               <div className="bg-white p-3.5 rounded-lg border border-slate-200 shadow-xs">
-                <p className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Payable Hours</p>
-                <p className="text-xl font-bold text-slate-900 mt-1">{summaryData.summary.totalPayableHours} hrs</p>
+                <p className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
+                  {displayUnit === 'DAYS' ? 'Payable Days' : 'Payable Hours'}
+                </p>
+                <p className="text-xl font-bold text-slate-900 mt-1">
+                  {displayUnit === 'DAYS'
+                    ? `${(parseFloat(summaryData.summary.totalPayableHours || 0) / 8).toFixed(1)} Days`
+                    : `${summaryData.summary.totalPayableHours} hrs`}
+                </p>
               </div>
               <div className="bg-white p-3.5 rounded-lg border border-slate-200 shadow-xs">
-                <p className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Overtime</p>
-                <p className="text-xl font-bold text-emerald-600 mt-1">+{summaryData.summary.overtimeHours} hrs</p>
+                <p className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
+                  {displayUnit === 'DAYS' ? 'Overtime Days' : 'Overtime'}
+                </p>
+                <p className="text-xl font-bold text-emerald-600 mt-1">
+                  {displayUnit === 'DAYS'
+                    ? `+${(parseFloat(summaryData.summary.overtimeHours || 0) / 8).toFixed(1)} Days`
+                    : `+${summaryData.summary.overtimeHours} hrs`}
+                </p>
               </div>
             </div>
 
@@ -716,7 +739,7 @@ export default function AttendanceView({
 
                               {/* 2. First In */}
                               <td className="py-3 px-4 font-mono text-slate-600 whitespace-nowrap">
-                                {d.firstIn}
+                                {d.firstInAt ? formatLocalTime(d.firstInAt, d.firstIn) : d.firstIn}
                               </td>
 
                               {/* 3. Last Out */}
@@ -724,7 +747,7 @@ export default function AttendanceView({
                                 {d.lastOut === 'Running' ? (
                                   <span className="text-emerald-600 font-semibold animate-pulse">Running</span>
                                 ) : (
-                                  d.lastOut
+                                  d.lastOutAt ? formatLocalTime(d.lastOutAt, d.lastOut) : d.lastOut
                                 )}
                               </td>
 
@@ -916,8 +939,8 @@ export default function AttendanceView({
                             </span>
                           </div>
                           <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-                            <span>Clock In: <b className="font-mono text-slate-700">{emp.firstIn}</b></span>
-                            <span>{emp.department}</span>
+                            <span>Clock In: <b className="font-mono text-slate-700">{formatLocalTime(emp.clockInAt, emp.firstIn)}</b></span>
+                            <span>{emp.employeeNumber ? `${emp.employeeNumber} · ` : ''}{emp.department}</span>
                           </div>
                         </div>
                       ))

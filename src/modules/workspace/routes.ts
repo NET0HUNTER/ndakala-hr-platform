@@ -351,6 +351,8 @@ export function createWorkspaceRouter(deps: AppDeps): Router {
           dayName,
           firstIn,
           lastOut,
+          firstInAt: dayPunches.length > 0 ? dayPunches[0].clockInAt.toISOString() : null,
+          lastOutAt: dayPunches.length > 0 && dayPunches[dayPunches.length - 1].clockOutAt ? dayPunches[dayPunches.length - 1].clockOutAt!.toISOString() : null,
           totalHours: formatSecsToHHMM(dayWorkedSecs),
           payableHours: formatSecsToHHMM(dayPayableSecs),
           deviation: deviationStr,
