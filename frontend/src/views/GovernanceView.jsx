@@ -37,6 +37,7 @@ function formatHoursHhMm(decimalHours) {
 export default function GovernanceView({
   activeTab = 'timetracker',
   topContextTab = 'mydata',
+  setTopContextTab,
   subViewHint = null,
   currentUser,
   employees = [],
