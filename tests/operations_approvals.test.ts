@@ -64,6 +64,7 @@ describe('Operations Approvals Hub Parity (#operations/approvals)', () => {
         startDate: '2026-11-25',
         endDate: '2026-11-26',
         reason: 'Family event attendance',
+        replaceOverlapping: true,
       });
 
     expect(createRes.status).toBe(201);
@@ -101,6 +102,7 @@ describe('Operations Approvals Hub Parity (#operations/approvals)', () => {
         startDate: '2026-11-28',
         endDate: '2026-11-29',
         reason: 'Weekend extension test',
+        replaceOverlapping: true,
       });
 
     expect(createRes.status).toBe(201);
