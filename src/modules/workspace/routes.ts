@@ -501,7 +501,7 @@ export function createWorkspaceRouter(deps: AppDeps): Router {
           email: emp.user?.email || '',
           department: emp.department?.name || 'General Advisory',
           position: emp.position?.title || 'Team Member',
-          avatarUrl: emp.avatarUrl,
+          avatarUrl: (emp as any).avatarUrl || null,
         };
 
         if (punch) {
