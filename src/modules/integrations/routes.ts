@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
 import { registerRoute } from '../../core/http/route.js';
@@ -5,8 +6,11 @@ import type { AppDeps } from '../../core/http/context.js';
 import { IntegrationService } from './service.js';
 import { auditCtx } from '../employees/util.js';
 import { IntegrationProvider } from './types.js';
+import { decrypt, encrypt } from '../../core/crypto/vault.js';
 import {
   acquireAppOnlyToken,
+  acquireDelegatedToken,
+  clearM365TokenCache,
   getActiveM365Config,
   resolveSharePointFolderForCategory,
   resolveSharePointSiteAndDrive,
@@ -239,7 +243,7 @@ export function createIntegrationsRouter(deps: AppDeps): Router {
     },
   });
 
-  // 12. Microsoft 365 App-Only Connectivity Test
+  // 12. Microsoft 365 App-Only / Delegated OneDrive Connectivity Test
   registerRoute(router, deps, {
     method: 'post',
     path: '/integrations/m365/test-connection',
@@ -253,6 +257,32 @@ export function createIntegrationsRouter(deps: AppDeps): Router {
           message: 'Microsoft 365 integration is inactive or missing Tenant ID / Client ID / Client Secret.',
         };
       }
+
+      if (cfg.delegatedRefreshToken) {
+        await acquireDelegatedToken(cfg);
+        try {
+          const { siteId, driveId } = await resolveSharePointSiteAndDrive(cfg);
+          return {
+            connected: true,
+            oauthTokenAcquired: true,
+            mode: 'DELEGATED_ONEDRIVE',
+            delegatedUserEmail: cfg.delegatedUserEmail || cfg.senderMailbox,
+            onedriveConnected: true,
+            siteId,
+            driveId,
+          };
+        } catch (odErr: any) {
+          return {
+            connected: true,
+            oauthTokenAcquired: true,
+            mode: 'DELEGATED_ONEDRIVE',
+            delegatedUserEmail: cfg.delegatedUserEmail || cfg.senderMailbox,
+            onedriveConnected: false,
+            onedriveMessage: odErr?.message || 'OneDrive lookup failed.',
+          };
+        }
+      }
+
       const accessToken = await acquireAppOnlyToken(cfg);
       let grantedRoles: string[] = [];
       try {
@@ -288,6 +318,140 @@ export function createIntegrationsRouter(deps: AppDeps): Router {
           senderMailbox: cfg.senderMailbox,
         };
       }
+    },
+  });
+
+  // 12B. Start Delegated OneDrive & Outlook OAuth2 Sign-In
+  registerRoute(router, deps, {
+    method: 'get',
+    path: '/integrations/m365/oauth/start',
+    auth: { permission: 'integrations.manage' },
+    handler: async ({ deps }) => {
+      const cfg = await getActiveM365Config(deps.prisma);
+      if (!cfg) {
+        throw new Error('Save Microsoft 365 Client ID and Client Secret first before connecting OneDrive.');
+      }
+      const redirectUri = `${cfg.appBaseUrl}/api/v1/integrations/m365/callback`;
+      const stateNonce = crypto.randomBytes(12).toString('hex');
+      const sig = crypto
+        .createHmac('sha256', cfg.clientSecret)
+        .update(stateNonce)
+        .digest('hex')
+        .slice(0, 24);
+      const state = `${stateNonce}.${sig}`;
+      const params = new URLSearchParams({
+        client_id: cfg.clientId,
+        response_type: 'code',
+        redirect_uri: redirectUri,
+        response_mode: 'query',
+        scope: 'offline_access User.Read Files.ReadWrite Mail.Send Calendars.ReadWrite',
+        state,
+        prompt: 'select_account',
+      });
+      return {
+        authorizeUrl: `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?${params.toString()}`,
+        redirectUri,
+      };
+    },
+  });
+
+  // 12C. Delegated OneDrive & Outlook OAuth2 Callback
+  registerRoute(router, deps, {
+    method: 'get',
+    path: '/integrations/m365/callback',
+    auth: 'public',
+    handler: async ({ req, res, deps }) => {
+      const code = String(req.query.code || '');
+      const state = String(req.query.state || '');
+      const errParam = String(req.query.error || '');
+      const errDesc = String(req.query.error_description || '');
+
+      if (errParam) {
+        res.status(400).send(`<html><body style="font-family:sans-serif;padding:32px"><h3>Microsoft Sign-In Declined</h3><p>${errParam}: ${errDesc}</p><a href="/">Return to Ndakala HR Portal</a></body></html>`);
+        return;
+      }
+
+      const cfg = await getActiveM365Config(deps.prisma);
+      if (!cfg || !code) {
+        res.status(400).send('<html><body style="font-family:sans-serif;padding:32px"><h3>Missing M365 Configuration or Authorization Code</h3><a href="/">Return to Ndakala HR Portal</a></body></html>');
+        return;
+      }
+
+      // Verify HMAC state
+      const [nonce, sig] = state.split('.');
+      const expectedSig = nonce
+        ? crypto.createHmac('sha256', cfg.clientSecret).update(nonce).digest('hex').slice(0, 24)
+        : '';
+      if (!nonce || sig !== expectedSig) {
+        res.status(400).send('<html><body style="font-family:sans-serif;padding:32px"><h3>Invalid OAuth State Signature</h3><a href="/">Return to Ndakala HR Portal</a></body></html>');
+        return;
+      }
+
+      const redirectUri = `${cfg.appBaseUrl}/api/v1/integrations/m365/callback`;
+      const tokenResp = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: cfg.clientId,
+          client_secret: cfg.clientSecret,
+          code,
+          redirect_uri: redirectUri,
+          grant_type: 'authorization_code',
+          scope: 'offline_access User.Read Files.ReadWrite Mail.Send Calendars.ReadWrite',
+        }).toString(),
+      });
+
+      const tokenJson = (await tokenResp.json()) as any;
+      if (!tokenResp.ok || !tokenJson.access_token || !tokenJson.refresh_token) {
+        res.status(400).send(`<html><body style="font-family:sans-serif;padding:32px"><h3>Token Exchange Failed</h3><pre>${JSON.stringify(tokenJson, null, 2)}</pre><a href="/">Return to Ndakala HR Portal</a></body></html>`);
+        return;
+      }
+
+      const hdr = { Authorization: `Bearer ${tokenJson.access_token}` };
+      const [meResp, driveResp] = await Promise.all([
+        fetch('https://graph.microsoft.com/v1.0/me', { headers: hdr }).then((r) => r.json()).catch(() => ({})),
+        fetch('https://graph.microsoft.com/v1.0/me/drive', { headers: hdr }).then((r) => r.json()).catch(() => ({})),
+      ]);
+
+      const userEmail = String((meResp as any)?.mail || (meResp as any)?.userPrincipalName || cfg.senderMailbox);
+      const driveId = String((driveResp as any)?.id || '');
+
+      // Persist encrypted delegatedRefreshToken + driveId into MICROSOFT_365 config
+      const rec = await deps.prisma.integrationConfig.findUnique({ where: { provider: 'MICROSOFT_365' } });
+      if (rec) {
+        let existing: Record<string, any> = {};
+        try {
+          existing = JSON.parse(decrypt(rec.configPayloadEncrypted) || '{}');
+        } catch {
+          existing = {};
+        }
+        const merged = {
+          ...existing,
+          delegatedRefreshToken: tokenJson.refresh_token,
+          delegatedUserEmail: userEmail,
+          senderMailbox: userEmail,
+          sharepointSiteId: 'ONEDRIVE_DELEGATED',
+          ...(driveId ? { sharepointDriveId: driveId } : {}),
+        };
+        await deps.prisma.integrationConfig.update({
+          where: { provider: 'MICROSOFT_365' },
+          data: {
+            configPayloadEncrypted: encrypt(JSON.stringify(merged)),
+            status: 'ACTIVE',
+            isEnabled: true,
+          },
+        });
+        clearM365TokenCache();
+      }
+
+      res.send(`<html><body style="font-family:Inter,sans-serif;padding:40px;max-width:560px;margin:auto;color:#0f172a">
+        <h2 style="color:#0088ff">OneDrive &amp; Outlook Connected!</h2>
+        <p><strong>Account:</strong> ${userEmail}</p>
+        <p><strong>OneDrive ID:</strong> <code>${driveId || 'Ready'}</code></p>
+        <p>Your HR documents will now dual-write cleanly to your OneDrive alongside the AES-256 local vault.</p>
+        <a href="/" style="display:inline-block;margin-top:16px;padding:10px 18px;background:#0088ff;color:#fff;text-decoration:none;border-radius:6px;font-weight:600">Return to Ndakala HR Portal</a>
+      </body></html>`);
+      return;
     },
   });
 

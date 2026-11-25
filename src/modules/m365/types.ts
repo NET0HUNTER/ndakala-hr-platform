@@ -8,6 +8,9 @@ export interface M365AppConfig {
   sharepointDriveId?: string;
   senderMailbox: string; // e.g. noreply@company.com
   appBaseUrl: string;    // e.g. https://hr.company.com
+  delegatedRefreshToken?: string; // OAuth2 refresh token for OneDrive / Outlook delegated mode
+  delegatedUserEmail?: string;
+  onedriveRootFolder?: string;
   loginBaseUrl?: string; // override strictly allowed in test mode only
   graphBaseUrl?: string; // override strictly allowed in test mode only
 }

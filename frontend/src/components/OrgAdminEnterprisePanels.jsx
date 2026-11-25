@@ -840,6 +840,22 @@ export default function OrgAdminEnterprisePanels({
               <button type="button" onClick={handleTestM365Connection} className="px-3 py-1.5 border border-slate-300 rounded font-medium hover:bg-slate-50">
                 Test App-Only Graph Connection
               </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const res = await apiGet('/api/v1/integrations/m365/oauth/start');
+                    if (res?.authorizeUrl) {
+                      window.location.href = res.authorizeUrl;
+                    }
+                  } catch (err) {
+                    toast(err?.message || 'Failed to start OneDrive sign-in', 'error');
+                  }
+                }}
+                className="px-3 py-1.5 bg-[#191f3a] hover:bg-slate-800 text-white rounded font-medium"
+              >
+                Connect OneDrive &amp; Outlook (Microsoft Sign-In)
+              </button>
               <button type="button" onClick={handleSyncSharePoint} className="px-3 py-1.5 border border-emerald-300 text-emerald-700 rounded font-medium hover:bg-emerald-50">
                 Sync Vault Files to SharePoint
               </button>
@@ -1282,6 +1298,22 @@ export default function OrgAdminEnterprisePanels({
               </button>
               <button type="button" onClick={handleTestM365Connection} className="px-3 py-1.5 border border-slate-300 rounded font-medium hover:bg-slate-50">
                 Test App-Only Graph Connection
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const res = await apiGet('/api/v1/integrations/m365/oauth/start');
+                    if (res?.authorizeUrl) {
+                      window.location.href = res.authorizeUrl;
+                    }
+                  } catch (err) {
+                    toast(err?.message || 'Failed to start OneDrive sign-in', 'error');
+                  }
+                }}
+                className="px-3 py-1.5 bg-[#191f3a] hover:bg-slate-800 text-white rounded font-medium"
+              >
+                Connect OneDrive &amp; Outlook (Microsoft Sign-In)
               </button>
               <button type="button" onClick={handleSyncSharePoint} className="px-3 py-1.5 border border-emerald-300 text-emerald-700 rounded font-medium hover:bg-emerald-50">
                 Sync Vault Files to SharePoint

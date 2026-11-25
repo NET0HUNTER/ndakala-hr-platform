@@ -77,9 +77,58 @@ export async function getActiveM365Config(db: PrismaClient): Promise<M365AppConf
     sharepointDriveId: settings.sharepointDriveId ? String(settings.sharepointDriveId) : undefined,
     senderMailbox: String(settings.senderMailbox || process.env.M365_SENDER_MAILBOX || 'noreply@company.com'),
     appBaseUrl: String(settings.appBaseUrl || process.env.APP_BASE_URL || 'https://ndakalahr.duckdns.org').replace(/\/+$/, ''),
+    delegatedRefreshToken: settings.delegatedRefreshToken ? String(settings.delegatedRefreshToken) : undefined,
+    delegatedUserEmail: settings.delegatedUserEmail ? String(settings.delegatedUserEmail) : undefined,
+    onedriveRootFolder: settings.onedriveRootFolder ? String(settings.onedriveRootFolder) : 'NdakalaHR',
     loginBaseUrl: settings.loginBaseUrl ? String(settings.loginBaseUrl) : (process.env.M365_LOGIN_BASE_URL || undefined),
     graphBaseUrl: settings.graphBaseUrl ? String(settings.graphBaseUrl) : (process.env.M365_GRAPH_BASE_URL || undefined),
   };
+}
+
+export async function acquireDelegatedToken(config: M365AppConfig): Promise<string> {
+  if (!config.delegatedRefreshToken) {
+    throw new Error('Delegated OneDrive refresh token not configured');
+  }
+  const loginBase = assertAllowedM365Endpoint(
+    config.loginBaseUrl || 'https://login.microsoftonline.com',
+    'login',
+  );
+  const cacheKey = `delegated:${loginBase}:${config.clientId}:${config.delegatedUserEmail || 'me'}`;
+  const cached = tokenCache.get(cacheKey);
+  if (cached && cached.expiresAtMs > Date.now() + 60_000) {
+    return cached.accessToken;
+  }
+
+  const tokenUrl = `${loginBase}/common/oauth2/v2.0/token`;
+  const body = new URLSearchParams({
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    refresh_token: config.delegatedRefreshToken,
+    grant_type: 'refresh_token',
+    scope: 'offline_access User.Read Files.ReadWrite Mail.Send Calendars.ReadWrite',
+  });
+
+  const resp = await fetch(tokenUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => '');
+    throw new Error(`Microsoft Delegated OAuth refresh failed (${resp.status}): ${errText.slice(0, 240)}`);
+  }
+
+  const data = (await resp.json()) as { access_token?: string; expires_in?: number };
+  if (!data.access_token) {
+    throw new Error('Microsoft Delegated token response missing access_token');
+  }
+
+  tokenCache.set(cacheKey, {
+    accessToken: data.access_token,
+    expiresAtMs: Date.now() + (data.expires_in || 3600) * 1000,
+  });
+  return data.access_token;
 }
 
 export async function acquireAppOnlyToken(config: M365AppConfig): Promise<string> {
@@ -135,7 +184,9 @@ async function graphRequest(
     config.graphBaseUrl || 'https://graph.microsoft.com/v1.0',
     'graph',
   );
-  const token = await acquireAppOnlyToken(config);
+  const token = config.delegatedRefreshToken
+    ? await acquireDelegatedToken(config)
+    : await acquireAppOnlyToken(config);
   const cleanPath = relativePath.startsWith('/') ? relativePath : `/${relativePath}`;
   const url = cleanPath.startsWith('/v1.0') || cleanPath.startsWith('/beta')
     ? `${graphBase.replace(/\/v1\.0$/, '')}${cleanPath}`
@@ -153,6 +204,21 @@ async function graphRequest(
 export async function resolveSharePointSiteAndDrive(
   config: M365AppConfig,
 ): Promise<{ siteId: string; driveId: string }> {
+  // Delegated OneDrive Mode: resolve authenticated user's OneDrive (/me/drive)
+  if (config.delegatedRefreshToken) {
+    if (config.sharepointDriveId) {
+      return { siteId: config.sharepointSiteId || 'ONEDRIVE_DELEGATED', driveId: config.sharepointDriveId };
+    }
+    const resp = await graphRequest(config, '/me/drive');
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`OneDrive /me/drive lookup failed (${resp.status}): ${text.slice(0, 220)}`);
+    }
+    const driveJson = (await resp.json()) as { id?: string };
+    if (!driveJson.id) throw new Error('OneDrive drive response did not include id');
+    return { siteId: 'ONEDRIVE_DELEGATED', driveId: driveJson.id };
+  }
+
   let siteId = config.sharepointSiteId;
   let driveId = config.sharepointDriveId;
 
@@ -387,9 +453,12 @@ export async function sendM365NotificationEmail(
     saveToSentItems: false,
   };
 
+  const mailEndpoint = config.delegatedRefreshToken
+    ? '/me/sendMail'
+    : `/users/${encodeURIComponent(config.senderMailbox)}/sendMail`;
   const resp = await graphRequest(
     config,
-    `/users/${encodeURIComponent(config.senderMailbox)}/sendMail`,
+    mailEndpoint,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -447,9 +516,12 @@ export async function createSharedCalendarFreeEvent(
     },
   };
 
+  const calEndpoint = config.delegatedRefreshToken
+    ? '/me/events'
+    : `/users/${encodeURIComponent(params.sharedMailbox)}/events`;
   const resp = await graphRequest(
     config,
-    `/users/${encodeURIComponent(params.sharedMailbox)}/events`,
+    calEndpoint,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
