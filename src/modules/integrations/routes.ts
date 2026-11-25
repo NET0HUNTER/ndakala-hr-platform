@@ -253,15 +253,41 @@ export function createIntegrationsRouter(deps: AppDeps): Router {
           message: 'Microsoft 365 integration is inactive or missing Tenant ID / Client ID / Client Secret.',
         };
       }
-      await acquireAppOnlyToken(cfg);
-      const { siteId, driveId } = await resolveSharePointSiteAndDrive(cfg);
-      return {
-        connected: true,
-        mode: 'APP_ONLY_CLIENT_CREDENTIALS',
-        siteId,
-        driveId,
-        senderMailbox: cfg.senderMailbox,
-      };
+      const accessToken = await acquireAppOnlyToken(cfg);
+      let grantedRoles: string[] = [];
+      try {
+        const parts = accessToken.split('.');
+        if (parts.length >= 2) {
+          const decoded = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+          if (Array.isArray(decoded.roles)) grantedRoles = decoded.roles;
+        }
+      } catch {
+        // non-JWT or opaque test token
+      }
+
+      try {
+        const { siteId, driveId } = await resolveSharePointSiteAndDrive(cfg);
+        return {
+          connected: true,
+          oauthTokenAcquired: true,
+          grantedRoles,
+          sharepointConnected: true,
+          mode: 'APP_ONLY_CLIENT_CREDENTIALS',
+          siteId,
+          driveId,
+          senderMailbox: cfg.senderMailbox,
+        };
+      } catch (spErr: any) {
+        return {
+          connected: true,
+          oauthTokenAcquired: true,
+          grantedRoles,
+          sharepointConnected: false,
+          sharepointMessage: spErr?.message || 'SharePoint site unavailable on this tenant.',
+          mode: 'APP_ONLY_CLIENT_CREDENTIALS',
+          senderMailbox: cfg.senderMailbox,
+        };
+      }
     },
   });
 
