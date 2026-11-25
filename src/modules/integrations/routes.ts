@@ -438,7 +438,6 @@ export function createIntegrationsRouter(deps: AppDeps): Router {
           data: {
             configPayloadEncrypted: encrypt(JSON.stringify(merged)),
             status: 'ACTIVE',
-            isEnabled: true,
           },
         });
         clearM365TokenCache();
